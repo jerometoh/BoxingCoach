@@ -3,6 +3,7 @@ package com.jerome.boxingcoach
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,6 +68,18 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(settings) {
             WorkoutEngine.tts?.voiceMode = settings.voiceMode
             WorkoutEngine.restCoaching = settings.restCoaching
+            WorkoutEngine.warnSound = settings.warnSound
+            WorkoutEngine.endBell = settings.endBell
+        }
+        // Keep the screen awake only while a workout is actually on screen and running
+        LaunchedEffect(screen, workoutState.phase, settings.keepScreenOn) {
+            val shouldStayOn = settings.keepScreenOn && screen == Screen.WORKOUT &&
+                (workoutState.phase == WorkoutPhase.RUNNING || workoutState.phase == WorkoutPhase.PAUSED)
+            if (shouldStayOn) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
         }
         // Log history when a workout finishes
         LaunchedEffect(workoutState.phase) {
@@ -239,9 +252,15 @@ private fun ReviewScreen(
                             }
                             Text("${round.durationSec / 60} min ${round.durationSec % 60} sec — ${round.summary}",
                                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            round.cues.take(4).forEach { Text("• ${it.text}", fontSize = 13.sp) }
-                            if (round.cues.size > 4) Text("… +${round.cues.size - 4} more cues",
-                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            round.cues.firstOrNull { it.isIntro }?.let {
+                                Text(it.text, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
+                            }
+                            val commandSample = round.cues.filter { it.isCommand }.take(5)
+                            if (commandSample.isNotEmpty()) {
+                                Text("Live: " + commandSample.joinToString("  ·  ") { it.text },
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
@@ -272,27 +291,34 @@ private fun WorkoutScreen(
         else -> Color(0xFF200A0A)
     }
     Column(
-        Modifier.fillMaxSize().background(bg).padding(24.dp),
+        Modifier.fillMaxSize().background(bg).padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(24.dp))
-            Text(s.sectionTitle, fontSize = 18.sp, color = Color.White.copy(alpha = 0.7f))
-            Text(if (s.isRest) "REST" else s.roundLabel,
-                fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                textAlign = TextAlign.Center)
-        }
-
+        // Minimal, low-weight context line — round/section info is secondary to timing+action.
         Text(
-            "%d:%02d".format(s.secondsLeft / 60, s.secondsLeft % 60),
-            fontSize = 96.sp, fontWeight = FontWeight.Bold, color = Color.White
+            "${if (s.isRest) "REST" else s.sectionTitle.uppercase()} · ${s.roundLabel.substringAfter("— ").ifBlank { s.roundLabel }}",
+            fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f),
+            textAlign = TextAlign.Center, maxLines = 1
         )
 
         Text(
-            s.currentCue, fontSize = 30.sp, fontWeight = FontWeight.SemiBold,
-            color = Color(0xFFFFD54F), textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
+            "%d:%02d".format(s.secondsLeft / 60, s.secondsLeft % 60),
+            fontSize = 104.sp, fontWeight = FontWeight.Bold, color = Color.White,
+            lineHeight = 104.sp
+        )
+
+        // The action: commands render large and bold; the longer pre-round
+        // explanation renders smaller since it's read once, not reacted to.
+        Text(
+            s.currentCue,
+            fontSize = if (s.currentCueIsCommand) 52.sp else 22.sp,
+            fontWeight = if (s.currentCueIsCommand) FontWeight.ExtraBold else FontWeight.Medium,
+            color = if (s.currentCueIsCommand) Color(0xFFFFD54F) else Color.White.copy(alpha = 0.85f),
+            textAlign = TextAlign.Center,
+            lineHeight = if (s.currentCueIsCommand) 56.sp else 28.sp,
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            maxLines = if (s.currentCueIsCommand) 2 else 5,
         )
 
         if (s.phase == WorkoutPhase.FINISHED) {
@@ -358,6 +384,11 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         ToggleRow("Voice commands (experimental)", s.voiceCommands) { onChange(s.copy(voiceCommands = it)) }
         Text("Voice commands: say pause / go / skip / repeat. Accuracy drops with loud music — on-screen buttons always work.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        SectionHeader("During workout")
+        ToggleRow("Keep screen on", s.keepScreenOn) { onChange(s.copy(keepScreenOn = it)) }
+        ToggleRow("Clap sound at 10 seconds left", s.warnSound) { onChange(s.copy(warnSound = it)) }
+        ToggleRow("Bell at round changes", s.endBell) { onChange(s.copy(endBell = it)) }
     }
 }
 

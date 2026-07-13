@@ -76,6 +76,44 @@ automatically — no computer needed at any point.
 The app requests notification permission (for the workout foreground notification)
 and microphone permission (only used if you enable experimental voice commands).
 
+## What changed since the first build
+
+- **Screen stays on during a workout** (Settings → "Keep screen on", default on) —
+  only while a workout is actively showing on screen; normal battery behaviour resumes
+  as soon as you leave the workout screen.
+- **Better voice**: the app now picks the highest-quality on-device English voice
+  available and speaks slightly faster and a touch lower — reads more like a live
+  corner call than a narrator. If it's still not to your taste, the single biggest
+  lever is which TTS voices are installed on the phone, not app settings — see
+  "Improving the voice further" below.
+- **Workout screen re-weighted**: round/section label is now a small single line at
+  the top; the timer and the current instruction dominate the screen. Live commands
+  ("Go", "Down", "Feint"...) render extra large and bold; the once-per-round
+  explanation renders smaller since it's read, not reacted to.
+- **Clap sound at 10 seconds left** and **bell at every round change** — both
+  toggleable in Settings. These are synthesized tones (no audio files bundled), so
+  they're simple beeps/clap-pattern rather than a recorded bell — good enough as a
+  timing cue, not a sound-design centerpiece.
+- **New round model — one (or two) combos per round, called out before it starts.**
+  Instead of a stream of different combos to parse mid-round, each round now opens
+  with a spoken/text intro like *"This round: focus on jab, cross, left hook. When I
+  say go, throw it. Feint and jab to hold range in between. When I say down, hit the
+  floor for a quick move."* During the round you only hear short triggers: **Go**
+  (throw the assigned combo — or **Go one** / **Go two** on rounds with two combos),
+  **Down — ...** (a quick conditioning move), and spacing fillers (**Feint**, **Jab,
+  keep range**, **Circle left**...) so you're not standing idle between attacks. This
+  applies to both shadow boxing and heavy bag rounds. Difficulty controls combo
+  complexity and whether 1 or 2 combos are assigned; intensity controls how often
+  "Go"/"Down" are called.
+
+### Improving the voice further
+Android's built-in TTS quality varies a lot by phone and by which voice pack is
+installed. On your Pixel: Settings → System → Languages & input → Text-to-speech
+output → tap the gear next to "Google Text-to-speech" (or your engine) → Install
+voice data → download a higher-quality English (UK) voice if one isn't already
+present. The app automatically picks the best-quality installed voice on next launch
+— no in-app step needed once a better voice is on the device.
+
 ## Features
 
 - **Setup**: toggle sections (warm-up / shadow / bag / core / cool-down), set rounds

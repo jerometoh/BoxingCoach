@@ -22,8 +22,10 @@ data class RoutineParams(
     val intensity: Intensity = Intensity.MEDIUM,
 )
 
-/** A single spoken/displayed instruction at an offset (seconds) into its round. */
-data class Cue(val offsetSec: Int, val text: String)
+/** A single spoken/displayed instruction at an offset (seconds) into its round.
+ *  isIntro = the pre-round explanation (combo assignment), shown/spoken once at t=0.
+ *  isCommand = a short live trigger word ("Go", "Down", "Feint"...) rendered large. */
+data class Cue(val offsetSec: Int, val text: String, val isIntro: Boolean = false, val isCommand: Boolean = false)
 
 data class Round(
     val label: String,             // e.g. "Shadow boxing — Round 2 of 3"
@@ -60,4 +62,7 @@ data class AppSettings(
     val stance: Stance = Stance.ORTHODOX,
     val restCoaching: Boolean = true,     // spoken tips during rest vs tone only
     val voiceCommands: Boolean = false,   // experimental hands-free control
+    val keepScreenOn: Boolean = true,     // prevent screen dimming/locking during workout
+    val warnSound: Boolean = true,        // clap-style sound at 10 seconds remaining
+    val endBell: Boolean = true,          // bell at end of round / start of next
 )

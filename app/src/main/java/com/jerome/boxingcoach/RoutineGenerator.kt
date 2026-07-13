@@ -5,14 +5,20 @@ import kotlin.random.Random
 /**
  * Generates a full routine from params.
  *
- * Escalation model:
- *  - Each work round gets a complexity "tier" 1..4 derived from its position in the
- *    section AND the Difficulty setting. Round 1 always starts simple; later rounds
- *    climb faster/higher at higher difficulty.
- *  - Intensity controls cue density (shorter gaps), conditioning insertions, and
- *    rest length trimming.
- *  - Difficulty controls combo tier ceiling, open-combo ratio, movement layering,
- *    and single-focus round probability.
+ * Round model (call-and-response): each work round is assigned ONE combo, or
+ * TWO for later/harder rounds, announced in full before the round starts (an
+ * "intro" cue at t=0). During the round, only short trigger words are called:
+ *  - "Go" (or "Go one" / "Go two" when two combos are assigned) — throw the
+ *    assigned combo.
+ *  - "Down — ..." — a quick conditioning move.
+ *  - Spacing fillers ("Feint", "Jab, keep range", "Circle left"...) — used
+ *    between attacks so the user isn't standing idle waiting on a command.
+ * This keeps live listening simple: you already know the combo, you're just
+ * waiting for the trigger, rather than parsing a new combo every few seconds.
+ *
+ * Escalation: round position + Difficulty controls combo complexity (tier) and
+ * whether 1 or 2 combos are assigned. Intensity controls how densely commands
+ * are called and how often "Down" appears, plus rest length.
  */
 object RoutineGenerator {
 
@@ -56,7 +62,6 @@ object RoutineGenerator {
         val section = routine.sections[sectionIndex]
         val p = routine.params
         val rng = Random(System.nanoTime())
-        // Only meaningful for work sections; others regenerate whole section.
         if (section.type != SectionType.SHADOW && section.type != SectionType.BAG)
             return regenerateSection(routine, sectionIndex, stance)
 
@@ -123,95 +128,88 @@ object RoutineGenerator {
         p: RoutineParams, stance: Stance, rng: Random
     ): Round {
         val progress = if (total <= 1) 1f else index.toFloat() / (total - 1)
+
+        // ---- Tier (combo complexity ceiling) climbs with round position & difficulty ----
         val ceiling = when (p.difficulty) {
-            Difficulty.BEGINNER -> 3
-            Difficulty.INTERMEDIATE -> 4
+            Difficulty.BEGINNER -> 2
+            Difficulty.INTERMEDIATE -> 3
             Difficulty.ADVANCED -> 4
         }
-        // Tier climbs with round position; advanced climbs faster and starts higher.
         val base = when (p.difficulty) {
             Difficulty.BEGINNER -> 1f
             Difficulty.INTERMEDIATE -> 1f
-            Difficulty.ADVANCED -> 1.5f
+            Difficulty.ADVANCED -> 2f
         }
         val tier = (base + progress * (ceiling - base)).toInt().coerceIn(1, ceiling)
 
+        // ---- How many combos assigned this round ----
+        val twoComboChance = when (p.difficulty) {
+            Difficulty.BEGINNER -> 0f
+            Difficulty.INTERMEDIATE -> if (progress > 0.6f) 0.35f else 0f
+            Difficulty.ADVANCED -> if (progress > 0.3f) 0.55f else 0.15f
+        }
+        val comboCount = if (rng.nextFloat() < twoComboChance) 2 else 1
+
+        // ---- Pick the assigned combo(s) ----
+        fun pickCombo(): String {
+            // Advanced/high-tier rounds occasionally draw a combo+movement pattern instead of a plain combo.
+            return if (tier >= 3 && p.difficulty == Difficulty.ADVANCED && rng.nextFloat() < 0.35f) {
+                ComboLibrary.comboWithMovement.random(rng)
+            } else {
+                val pool = ComboLibrary.combos.filter { it.tier <= tier && it.tier >= (tier - 1).coerceAtLeast(1) }
+                pool.random(rng).text
+            }
+        }
+        val assigned = (1..comboCount).map { pickCombo() }.distinct().ifEmpty { listOf(pickCombo()) }
+        val renderedCombos = assigned.map { ComboLibrary.render(it, stance) }
+
         val label = "${sectionNoun(type)} — Round ${index + 1} of $total"
 
-        // Single-focus round? Never the first round; more likely later and at higher difficulty.
-        val focusChance = when (p.difficulty) {
-            Difficulty.BEGINNER -> 0.08f
-            Difficulty.INTERMEDIATE -> 0.15f
-            Difficulty.ADVANCED -> 0.22f
-        } * if (index == 0) 0f else 1f
-        if (rng.nextFloat() < focusChance) {
-            val theme = ComboLibrary.render(ComboLibrary.focusThemes.random(rng), stance)
-            val cues = mutableListOf(Cue(0, theme))
-            // Sparse mid-round reminders + a switch-up for hook-focus style themes
-            var t = durationSec / 3
-            cues += Cue(t, "Stay on it. Same focus.")
-            t = durationSec * 2 / 3
-            cues += Cue(t, pick(rng, "Pick up the pace for the last minute.", "Add head movement between reps.", "Double up now — two at a time."))
-            return Round(label, durationSec, cues, "FOCUS ROUND: ${theme.removePrefix("This whole round: ")}")
+        // ---- Intro cue: explain the round before it starts ----
+        val introText = if (renderedCombos.size == 1) {
+            "This round: focus on ${renderedCombos[0]}. When I say go, throw it. " +
+                "Feint and jab to hold range in between. When I say down, hit the floor for a quick move."
+        } else {
+            "This round, two combos. One: ${renderedCombos[0]}. Two: ${renderedCombos[1]}. " +
+                "When I call go one or go two, throw that combo. Feint and jab in between to hold range. " +
+                "When I say down, hit the floor for a quick move."
         }
+        val cues = mutableListOf(Cue(0, introText, isIntro = true))
 
-        // Normal round: build a cue timeline with randomized gaps.
+        // ---- Command stream ----
         val gapRange = when (p.intensity) {
-            Intensity.LOW -> 12..16
-            Intensity.MEDIUM -> 9..14
-            Intensity.HIGH -> 7..11
+            Intensity.LOW -> 10..14
+            Intensity.MEDIUM -> 8..12
+            Intensity.HIGH -> 6..10
         }
-        val openRatio = when (p.difficulty) {
-            Difficulty.BEGINNER -> 0.10f
-            Difficulty.INTERMEDIATE -> 0.25f
-            Difficulty.ADVANCED -> 0.40f
+        val downRatio = when (p.intensity) {
+            Intensity.LOW -> 0.08f
+            Intensity.MEDIUM -> if (progress > 0.4f) 0.16f else 0.10f
+            Intensity.HIGH -> if (progress > 0.2f) 0.26f else 0.16f
         }
-        val movementRatio = when (p.difficulty) {
-            Difficulty.BEGINNER -> 0.15f
-            Difficulty.INTERMEDIATE -> 0.25f
-            Difficulty.ADVANCED -> 0.30f
-        }
-        val conditioningRatio = when (p.intensity) {
-            Intensity.LOW -> 0f
-            Intensity.MEDIUM -> if (progress > 0.5f) 0.10f else 0f
-            Intensity.HIGH -> if (progress > 0.3f) 0.20f else 0.08f
-        }
-
-        val cues = mutableListOf<Cue>()
-        var t = 3 // first cue almost immediately
-        val summaryBits = mutableSetOf<String>()
-        while (t < durationSec - 8) {
+        val introReserve = 6 // seconds to let the intro line finish before commands start
+        var t = introReserve
+        var goToggle = false
+        while (t < durationSec - 6) {
             val roll = rng.nextFloat()
             val text = when {
-                roll < conditioningRatio && type == SectionType.BAG -> {
-                    summaryBits += "conditioning"
-                    ComboLibrary.conditioning.random(rng)
-                }
-                roll < conditioningRatio + movementRatio -> {
-                    summaryBits += "movement"
-                    if (tier >= 3 && rng.nextBoolean())
-                        ComboLibrary.comboWithMovement.random(rng)
-                    else ComboLibrary.movements.random(rng)
-                }
-                roll < conditioningRatio + movementRatio + openRatio && tier >= 2 -> {
-                    summaryBits += "open combos"
-                    val pool = ComboLibrary.openCombos.filter { it.second <= tier + 1 }
-                    pool.random(rng).first
-                }
+                roll < downRatio -> ComboLibrary.render(ComboLibrary.downCommands.random(rng), stance)
+                roll < downRatio + 0.35f -> ComboLibrary.render(ComboLibrary.spacingCues.random(rng), stance)
                 else -> {
-                    summaryBits += "tier-$tier combos"
-                    val pool = ComboLibrary.combos.filter { it.tier <= tier && it.tier >= (tier - 1).coerceAtLeast(1) }
-                    pool.random(rng).text
+                    if (renderedCombos.size == 2) {
+                        goToggle = !goToggle
+                        if (goToggle) "Go one" else "Go two"
+                    } else "Go"
                 }
             }
-            cues += Cue(t, ComboLibrary.render(text, stance))
+            cues += Cue(t, text, isCommand = true)
             t += rng.nextInt(gapRange.first, gapRange.last + 1)
         }
-        // Final push at high intensity
         if (p.intensity == Intensity.HIGH && durationSec >= 60) {
-            cues += Cue(durationSec - 15, "Last fifteen seconds — empty the tank!")
+            cues += Cue(durationSec - 15, "Last fifteen seconds — empty the tank!", isCommand = true)
         }
-        val summary = "Tier $tier · " + summaryBits.joinToString(", ")
+
+        val summary = "Tier $tier · " + renderedCombos.joinToString(" / ")
         return Round(label, durationSec, cues, summary)
     }
 
@@ -220,6 +218,4 @@ object RoutineGenerator {
         SectionType.BAG -> "Heavy bag"
         else -> "Round"
     }
-
-    private fun pick(rng: Random, vararg options: String) = options[rng.nextInt(options.size)]
 }

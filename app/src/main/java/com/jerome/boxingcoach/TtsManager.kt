@@ -41,6 +41,13 @@ class TtsManager(context: Context) {
         ready = status == TextToSpeech.SUCCESS
         if (ready) {
             tts.language = Locale.UK
+            selectBestVoice()
+            // Slightly faster and a touch lower than default: reads as a live
+            // corner call rather than a narrator. Adjust in Settings if it
+            // doesn't suit — see README for installing higher-quality system
+            // TTS voices, which affects this far more than rate/pitch do.
+            tts.setSpeechRate(1.12f)
+            tts.setPitch(0.92f)
             tts.setAudioAttributes(attrs)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
@@ -48,6 +55,17 @@ class TtsManager(context: Context) {
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) = maybeReleaseFocus()
             })
+        }
+    }
+
+    /** Pick the highest-quality, non-network-required English voice available on-device. */
+    private fun selectBestVoice() {
+        runCatching {
+            val candidates = tts.voices?.filter {
+                it.locale.language == Locale.UK.language && !it.isNetworkConnectionRequired
+            } ?: return
+            val best = candidates.maxByOrNull { it.quality } ?: return
+            tts.voice = best
         }
     }
 

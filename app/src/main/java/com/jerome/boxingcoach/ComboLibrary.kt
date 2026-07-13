@@ -88,6 +88,26 @@ object ComboLibrary {
         "Twenty-second nonstop punch-out — go",
     )
 
+    // ---- Short "down" commands for the call-and-response model (one-word-ish, quick to react to) ----
+    val downCommands = listOf(
+        "Down — two squats",
+        "Down — four mountain climbers",
+        "Down — one burpee",
+        "Down — hold a squat, guard up",
+        "Down — five fast punches on the floor",
+    )
+
+    // ---- Spacing/filler cues used between "Go" commands — short, not full combos ----
+    val spacingCues = listOf(
+        "Feint",
+        "Jab, keep range",
+        "Circle {L}",
+        "Circle {R}",
+        "Reset your guard",
+        "Slip and reset",
+        "Bounce, stay loose",
+    )
+
     // ---- Single-focus round themes ----
     val focusThemes = listOf(
         "This whole round: {L} hooks to the body only. Work angles between shots.",

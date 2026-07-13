@@ -33,6 +33,9 @@ class SettingsStore(context: Context) {
         stance = Stance.valueOf(prefs.getString("stance", Stance.ORTHODOX.name)!!),
         restCoaching = prefs.getBoolean("restCoaching", true),
         voiceCommands = prefs.getBoolean("voiceCommands", false),
+        keepScreenOn = prefs.getBoolean("keepScreenOn", true),
+        warnSound = prefs.getBoolean("warnSound", true),
+        endBell = prefs.getBoolean("endBell", true),
     )
 
     fun save(s: AppSettings) {
@@ -41,6 +44,9 @@ class SettingsStore(context: Context) {
             .putString("stance", s.stance.name)
             .putBoolean("restCoaching", s.restCoaching)
             .putBoolean("voiceCommands", s.voiceCommands)
+            .putBoolean("keepScreenOn", s.keepScreenOn)
+            .putBoolean("warnSound", s.warnSound)
+            .putBoolean("endBell", s.endBell)
             .apply()
     }
 
