@@ -397,7 +397,18 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         // ---- System voice picker ----
-        val voices = remember { CoachVoice.systemEngine?.availableVoices() ?: emptyList() }
+        var voiceRefresh by remember { mutableStateOf(0) }
+        val voices = remember(voiceRefresh) { CoachVoice.systemEngine?.availableVoices() ?: emptyList() }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Voices found: ${voices.size}", fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { voiceRefresh++ }) { Text("Refresh") }
+        }
+        if (voices.isEmpty()) {
+            Text("If you installed a neural TTS engine (e.g. SherpaTTS / sherpa-onnx), open its app once to finish setup, set it as the default engine in Android Settings → Text-to-speech, then tap Refresh. Fully reopening this app also helps.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (voices.isNotEmpty()) {
                 var expanded by remember { mutableStateOf(false) }
                 val currentLabel = voices.firstOrNull { it.name == s.voiceName }

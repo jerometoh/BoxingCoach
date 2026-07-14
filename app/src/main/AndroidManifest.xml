@@ -7,6 +7,18 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Android 11+ package visibility: needed to detect installed TTS engines
+         (sherpa-onnx / SherpaTTS) via PackageManager and to bind to them. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <package android:name="org.woheller69.ttsengine" />
+        <package android:name="com.k2fsa.sherpa.onnx.tts.engine" />
+        <package android:name="com.k2fsa.sherpa.onnx" />
+    </queries>
+
+
     <application
         android:label="Boxing Coach"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"

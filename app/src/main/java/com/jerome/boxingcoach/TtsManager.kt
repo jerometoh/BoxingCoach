@@ -41,31 +41,59 @@ class TtsManager(context: Context) : SpeechEngine {
         .setOnAudioFocusChangeListener { /* transient only; nothing to do */ }
         .build()
 
-    private val tts: TextToSpeech = TextToSpeech(context) { status ->
-        ready = status == TextToSpeech.SUCCESS
-        if (ready) {
-            tts.language = Locale.UK
-            applyVoiceSelection()
-            // Slightly faster and a touch lower than default: reads as a live
-            // corner call rather than a narrator.
-            tts.setSpeechRate(1.12f)
-            tts.setPitch(0.92f)
-            tts.setAudioAttributes(attrs)
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) = maybeReleaseFocus()
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) = maybeReleaseFocus()
-            })
+    // Known package names for sherpa-onnx-based TTS engines. If one is installed,
+    // we bind our TextToSpeech to it directly so its neural voices are listed even
+    // if the user hasn't made it the system default engine.
+    //  - com.k2fsa.sherpa.onnx.tts.engine : official k2-fsa engine APK (one voice at a time)
+    //  - org.woheller69.ttsengine        : "SherpaTTS" on F-Droid (multiple switchable voices)
+    private val sherpaPackages = listOf(
+        "org.woheller69.ttsengine",
+        "com.k2fsa.sherpa.onnx.tts.engine",
+        "com.k2fsa.sherpa.onnx",
+    )
+
+    private fun installedSherpaEngine(context: Context): String? {
+        val pm = context.packageManager
+        return sherpaPackages.firstOrNull { pkg ->
+            runCatching { pm.getPackageInfo(pkg, 0); true }.getOrDefault(false)
         }
     }
 
-    /** All installed English voices that work offline, best quality first. */
+    private val tts: TextToSpeech = run {
+        val engine = installedSherpaEngine(context)
+        val listener = TextToSpeech.OnInitListener { status ->
+            ready = status == TextToSpeech.SUCCESS
+            if (ready) {
+                tts.language = Locale.UK
+                applyVoiceSelection()
+                tts.setSpeechRate(1.12f)
+                tts.setPitch(0.92f)
+                tts.setAudioAttributes(attrs)
+                tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) = maybeReleaseFocus()
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) = maybeReleaseFocus()
+                })
+            }
+        }
+        if (engine != null) TextToSpeech(context, listener, engine)
+        else TextToSpeech(context, listener)
+    }
+
+    /** All installed English voices, best quality first. Deliberately permissive:
+     *  third-party engines (e.g. sherpa-onnx / Piper) report locales as "eng",
+     *  "en_GB", "en-GB" etc. and sometimes set isNetworkConnectionRequired oddly,
+     *  so we match any locale whose language starts with "en" and don't filter on
+     *  the network flag. */
     fun availableVoices(): List<Voice> {
         if (!ready) return emptyList()
         return runCatching {
             tts.voices
-                ?.filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
+                ?.filter {
+                    val lang = it.locale.language.lowercase()
+                    lang.startsWith("en")
+                }
                 ?.sortedByDescending { it.quality }
                 ?: emptyList()
         }.getOrDefault(emptyList())
@@ -75,7 +103,10 @@ class TtsManager(context: Context) : SpeechEngine {
     fun setVoice(name: String, preview: Boolean = false) {
         requestedVoiceName = name
         applyVoiceSelection()
-        if (preview) speak("Round two. One combo: jab, cross, left hook. On go, throw it.")
+        if (preview) {
+            cut() // stop any in-progress or queued preview so this one replaces it
+            speak("Round two. One combo: jab, cross, left hook. On go, throw it.")
+        }
     }
 
     private fun applyVoiceSelection() {
