@@ -18,6 +18,36 @@ routine from your parameters and delivers spoken coaching cues over your music
 After the first install the app stays on your phone — you don't need the computer again
 unless you change the code.
 
+## Faster updates: one-command push (after first-time setup)
+
+Every zip from here on includes `push.sh` at the repo root, which does the whole
+unzip → copy → commit → push sequence in one command, using whatever zip is newest
+in your Downloads.
+
+**One-time setup** (do this once, now that `push.sh` exists in the repo):
+```
+cd ~/BoxingCoach
+echo "alias bcpush='bash ~/BoxingCoach/push.sh'" >> ~/.bashrc
+source ~/.bashrc
+```
+
+**From then on**, every update is just:
+1. Download the new zip from the chat (as usual).
+2. In Termux, from anywhere:
+   ```
+   bcpush
+   ```
+   or with a custom commit message:
+   ```
+   bcpush "describe the change"
+   ```
+
+That replaces the whole unzip/copy/commit/push block you'd otherwise scroll up to
+copy each time. If `bcpush` isn't found in a new Termux session, it means
+`~/.bashrc` isn't being sourced automatically — run `source ~/.bashrc` once, or
+just use `bash ~/BoxingCoach/push.sh` directly, which always works regardless of
+aliases.
+
 ## Building entirely from your phone (no computer)
 
 This project includes `.github/workflows/build.yml`, which builds a debug APK
@@ -84,6 +114,15 @@ library (runs Piper/VITS models via ONNX Runtime, entirely inside the app — MI
 licensed). This replaces needing to install/configure a separate TTS app or dig
 through Android's system voice settings: once a model is added to the repo, it's
 baked into the APK and just works for anyone who installs it.
+
+**Update**: the first push of this failed — I'd guessed the wrong JitPack coordinates
+(`sherpa-onnx-android`, a name that doesn't actually exist there). The real
+coordinates, found in the project's own `jitpack.yml`, are `com.github.k2-fsa:sherpa-onnx:v1.12.40`
+— note it's the repo name, not a separate Android artifact, and JitPack just
+re-publishes their prebuilt `.aar` release asset rather than compiling the C++ from
+scratch, which should also make this faster/more reliable than a from-source
+JitPack build. Fixed in this version. If it still fails to resolve, that's the
+next thing to send me the error on.
 
 **This is the riskiest change so far** — it's a third-party native library I
 couldn't compile-test in my build environment. The app is written to fail safe:
