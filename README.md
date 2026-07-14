@@ -108,6 +108,14 @@ and microphone permission (only used if you enable experimental voice commands).
 
 ## Changelog
 
+### v8
+- **`bcpush` now also clears old APKs from Downloads**: any `app-debug*.apk` file
+  already sitting in Downloads (from a previous manual download of a Release) is
+  deleted automatically at push time — by the time you're pushing a new update,
+  any old APK is guaranteed superseded anyway. This is separate from the earlier
+  GitHub-side Release cleanup (v6): that one keeps the Releases page tidy, this
+  one keeps your phone's Downloads folder tidy.
+
 ### v7 — embedded voice removed
 The embedded neural voice (sherpa-onnx / Piper) crashed at native-library load on
 the target device, reproducibly, across two different model sizes (medium and low)

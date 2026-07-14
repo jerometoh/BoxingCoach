@@ -21,6 +21,14 @@ cp -r "$HOME/tmp_boxingcoach/BoxingCoach/." .
 rm -rf "$HOME/tmp_boxingcoach"
 rm -f "$HOME/storage/downloads/"BoxingCoach*.zip
 
+# Any APK already in Downloads is from a build that's about to be superseded —
+# clear it out now so old and new installs don't pile up waiting to be sorted.
+APK_COUNT=$(ls "$HOME/storage/downloads/"app-debug*.apk 2>/dev/null | wc -l)
+if [ "$APK_COUNT" -gt 0 ]; then
+  echo "Removing $APK_COUNT old APK(s) from Downloads (superseded by this push)."
+  rm -f "$HOME/storage/downloads/"app-debug*.apk
+fi
+
 MSG="${1:-update $(date '+%Y-%m-%d %H:%M')}"
 git add -A
 git commit -m "$MSG" || echo "Nothing changed — nothing to commit."
