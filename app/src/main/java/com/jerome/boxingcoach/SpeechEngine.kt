@@ -1,7 +1,8 @@
 package com.jerome.boxingcoach
 
-/** Common surface WorkoutEngine talks to — implemented by EmbeddedTts (preferred,
- *  bundled neural voice, no phone setup) and TtsManager (system TTS fallback). */
+/** Common surface WorkoutEngine talks to. Currently implemented by TtsManager
+ *  (system TTS). Kept as an interface so an alternative engine could slot in
+ *  behind CoachVoice without touching WorkoutEngine. */
 interface SpeechEngine {
     var voiceMode: VoiceMode
     fun speak(text: String)

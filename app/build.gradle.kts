@@ -52,11 +52,4 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.code.gson:gson:2.11.0")
-    // Embedded offline neural TTS (Piper/VITS models via ONNX Runtime) — no phone-side
-    // setup needed. App falls back to system TTS automatically if no model is bundled
-    // or this fails to load. See README "Embedded voice" section.
-    // NOTE: coordinates are repo-name-based (per k2-fsa/sherpa-onnx's own jitpack.yml,
-    // which just re-publishes their prebuilt .aar release asset via JitPack) —
-    // NOT "sherpa-onnx-android", which doesn't exist as a JitPack artifact.
-    implementation("com.github.k2-fsa:sherpa-onnx:v1.12.40")
 }

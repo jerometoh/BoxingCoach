@@ -10,7 +10,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") } // hosts com.github.k2-fsa:sherpa-onnx-android
     }
 }
 rootProject.name = "BoxingCoach"

@@ -3,46 +3,28 @@ package com.jerome.boxingcoach
 import android.content.Context
 
 /**
- * Picks the embedded neural voice if a Piper model is bundled and loads
- * successfully; otherwise uses the phone's system TTS. WorkoutEngine only ever
- * talks to [active]/WorkoutEngine.tts via the SpeechEngine interface — it
- * doesn't need to know which one is live.
+ * Voice provider. Currently system TTS only.
  *
- * IMPORTANT: loading the embedded model (ONNX Runtime init on a ~15-60MB neural
- * net) can take real time — long enough to freeze the UI if done on the main
- * thread, which is exactly what happened in the version before this comment.
- * init() now returns immediately: the system engine is ready right away so the
- * app opens instantly, and the embedded model loads on a background thread,
- * hot-swapping into WorkoutEngine.tts only once it's actually ready.
+ * History: an embedded neural voice (sherpa-onnx / Piper) was tried here but
+ * crashed at native-library load on the target device — reproducibly, across
+ * two different model sizes — and couldn't be diagnosed without a device stack
+ * trace we couldn't capture. It was removed rather than left as a crash risk.
+ * The [usingEmbedded]/[embeddedLoadFailed] flags remain (always false) so the
+ * rest of the app compiles unchanged; a future embedded engine could slot back
+ * in behind this same facade.
  */
 object CoachVoice {
     var systemEngine: TtsManager? = null
         private set
-    @Volatile var embeddedEngine: EmbeddedTts? = null
-        private set
-    @Volatile var embeddedLoadFailed: Boolean = false
-        private set
 
-    val active: SpeechEngine? get() = embeddedEngine ?: systemEngine
-    val usingEmbedded: Boolean get() = embeddedEngine != null
+    val active: SpeechEngine? get() = systemEngine
+    val usingEmbedded: Boolean = false
+    val embeddedLoadFailed: Boolean = false
 
-    /** Non-blocking. Safe to call repeatedly — no-ops if already loaded/loading/disabled. */
-    fun init(context: Context, attemptEmbedded: Boolean) {
+    /** Non-blocking. Safe to call repeatedly. attemptEmbedded is accepted for
+     *  call-site compatibility but currently ignored (no embedded engine). */
+    fun init(context: Context, attemptEmbedded: Boolean = false) {
         if (systemEngine == null) systemEngine = TtsManager(context)
-        WorkoutEngine.tts = active // system engine immediately, so the app is usable right away
-
-        if (!attemptEmbedded) return
-        if (embeddedEngine == null && !embeddedLoadFailed) {
-            val appContext = context.applicationContext
-            Thread({
-                val loaded = EmbeddedTts.tryCreate(appContext)
-                if (loaded != null) {
-                    embeddedEngine = loaded
-                    WorkoutEngine.tts = loaded // hot-swap once ready; no-op if a workout never asked for tts
-                } else {
-                    embeddedLoadFailed = true
-                }
-            }, "EmbeddedTtsLoader").apply { isDaemon = true }.start()
-        }
+        WorkoutEngine.tts = active
     }
 }

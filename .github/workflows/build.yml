@@ -44,3 +44,11 @@ jobs:
           name: "Boxing Coach build #${{ github.run_number }}"
           files: ${{ steps.apk.outputs.path }}
           body: "Automatic debug build from commit ${{ github.sha }}. Download the .apk below and install on your phone."
+
+      - name: Delete older releases (keep only this one)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 200 --json tagName --jq '.[].tagName' \
+            | grep -v "^build-${{ github.run_number }}$" \
+            | xargs -r -n1 gh release delete --yes --cleanup-tag

@@ -108,6 +108,28 @@ and microphone permission (only used if you enable experimental voice commands).
 
 ## Changelog
 
+### v7 — embedded voice removed
+The embedded neural voice (sherpa-onnx / Piper) crashed at native-library load on
+the target device, reproducibly, across two different model sizes (medium and low)
+— which pointed to the native library itself not working on that device rather than
+any one model file. Diagnosing it further would have needed a device-level crash
+log (adb), which couldn't be captured on-device (wireless-debug pairing kept
+failing). Rather than ship a known crash, the whole embedded-voice path was removed:
+the sherpa-onnx dependency, the bundled model assets, and the experimental toggle
+are all gone. The app is back to the system voice, stable. The `SpeechEngine`
+interface and `CoachVoice` facade remain, so a different embedded engine could be
+slotted in later without disturbing the rest of the app. For a better system voice
+in the meantime, installing additional Google TTS voices on the phone and picking
+the deepest one in Settings remains the best available lever (see the voice notes
+below).
+
+### v6
+- **Old Release APKs no longer pile up**: the build workflow now deletes every
+  other release right after publishing the new one, so the Releases page always
+  shows just the latest build. This runs automatically on every push — nothing
+  changes in how you update the app. The next successful build also cleans out
+  the existing backlog of old releases in one go.
+
 ### v5 — embedded voice (no phone-side TTS setup)
 Added a fully offline, bundled neural voice using the open-source **sherpa-onnx**
 library (runs Piper/VITS models via ONNX Runtime, entirely inside the app — MIT
