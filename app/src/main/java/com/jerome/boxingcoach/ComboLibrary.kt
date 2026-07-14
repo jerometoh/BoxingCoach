@@ -88,13 +88,14 @@ object ComboLibrary {
         "Twenty-second nonstop punch-out — go",
     )
 
-    // ---- Short "down" commands for the call-and-response model (one-word-ish, quick to react to) ----
-    val downCommands = listOf(
-        "Down — two squats",
-        "Down — four mountain climbers",
-        "Down — one burpee",
-        "Down — hold a squat, guard up",
-        "Down — five fast punches on the floor",
+    // ---- Conditioning moves assigned per-round (announced in the intro; triggered by the round's down-word) ----
+    val downMoves = listOf(
+        "two squats",
+        "four mountain climbers",
+        "one burpee",
+        "a squat hold until I call you back up",
+        "five fast punches from the floor",
+        "one sprawl",
     )
 
     // ---- Spacing/filler cues used between "Go" commands — short, not full combos ----

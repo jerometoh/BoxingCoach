@@ -6,6 +6,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -17,8 +18,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * OVERLAY: speaks on the music stream without requesting focus.
  * TEXT_ONLY: never speaks.
  *
- * TTS uses USAGE_MEDIA audio attributes so output follows the music route
- * (Bluetooth earbuds/speaker) rather than defaulting to the phone speaker.
+ * Voice: the user can pick any installed English voice in Settings (stored by
+ * voice name); empty selection auto-picks the highest-quality offline voice.
+ * cut() flushes any speech in progress immediately (used by skip/stop).
  */
 class TtsManager(context: Context) {
 
@@ -26,6 +28,8 @@ class TtsManager(context: Context) {
     private var ready = false
     private val pending = AtomicInteger(0)
     var voiceMode: VoiceMode = VoiceMode.DUCK_MUSIC
+
+    private var requestedVoiceName: String = ""
 
     private val attrs = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -41,11 +45,9 @@ class TtsManager(context: Context) {
         ready = status == TextToSpeech.SUCCESS
         if (ready) {
             tts.language = Locale.UK
-            selectBestVoice()
+            applyVoiceSelection()
             // Slightly faster and a touch lower than default: reads as a live
-            // corner call rather than a narrator. Adjust in Settings if it
-            // doesn't suit — see README for installing higher-quality system
-            // TTS voices, which affects this far more than rate/pitch do.
+            // corner call rather than a narrator.
             tts.setSpeechRate(1.12f)
             tts.setPitch(0.92f)
             tts.setAudioAttributes(attrs)
@@ -58,14 +60,31 @@ class TtsManager(context: Context) {
         }
     }
 
-    /** Pick the highest-quality, non-network-required English voice available on-device. */
-    private fun selectBestVoice() {
+    /** All installed English voices that work offline, best quality first. */
+    fun availableVoices(): List<Voice> {
+        if (!ready) return emptyList()
+        return runCatching {
+            tts.voices
+                ?.filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
+                ?.sortedByDescending { it.quality }
+                ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
+    /** Set the voice by name ("" = auto best) and speak a short sample if requested. */
+    fun setVoice(name: String, preview: Boolean = false) {
+        requestedVoiceName = name
+        applyVoiceSelection()
+        if (preview) speak("Round two. One combo: jab, cross, left hook. On go, throw it.")
+    }
+
+    private fun applyVoiceSelection() {
+        if (!ready) return
         runCatching {
-            val candidates = tts.voices?.filter {
-                it.locale.language == Locale.UK.language && !it.isNetworkConnectionRequired
-            } ?: return
-            val best = candidates.maxByOrNull { it.quality } ?: return
-            tts.voice = best
+            val voices = availableVoices()
+            val chosen = voices.firstOrNull { it.name == requestedVoiceName }
+                ?: voices.firstOrNull()
+            if (chosen != null) tts.voice = chosen
         }
     }
 
@@ -78,7 +97,8 @@ class TtsManager(context: Context) {
         tts.speak(text, TextToSpeech.QUEUE_ADD, null, "cue-${System.nanoTime()}")
     }
 
-    fun stop() {
+    /** Immediately cut any speech in progress and drop everything queued. */
+    fun cut() {
         tts.stop()
         pending.set(0)
         audioManager.abandonAudioFocusRequest(focusRequest)
@@ -94,7 +114,7 @@ class TtsManager(context: Context) {
     }
 
     fun shutdown() {
-        stop()
+        cut()
         tts.shutdown()
     }
 }

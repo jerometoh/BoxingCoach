@@ -33,6 +33,7 @@ data class Round(
     val cues: List<Cue>,
     val summary: String,           // short description shown in review screen
     val isRest: Boolean = false,
+    val legend: String = "",       // trigger-word mapping shown on the workout screen, e.g. "Go → jab, cross · Down → two squats"
 )
 
 data class Section(
@@ -63,6 +64,7 @@ data class AppSettings(
     val restCoaching: Boolean = true,     // spoken tips during rest vs tone only
     val voiceCommands: Boolean = false,   // experimental hands-free control
     val keepScreenOn: Boolean = true,     // prevent screen dimming/locking during workout
-    val warnSound: Boolean = true,        // clap-style sound at 10 seconds remaining
-    val endBell: Boolean = true,          // bell at end of round / start of next
+    val warnSound: Boolean = true,        // clapper sound at 10 seconds remaining
+    val endBell: Boolean = true,          // ring bell at round changes
+    val voiceName: String = "",           // TTS voice identifier; empty = auto-pick best
 )

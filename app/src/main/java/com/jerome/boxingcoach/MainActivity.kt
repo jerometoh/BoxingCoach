@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -70,6 +72,7 @@ class MainActivity : ComponentActivity() {
             WorkoutEngine.restCoaching = settings.restCoaching
             WorkoutEngine.warnSound = settings.warnSound
             WorkoutEngine.endBell = settings.endBell
+            WorkoutEngine.tts?.setVoice(settings.voiceName)
         }
         // Keep the screen awake only while a workout is actually on screen and running
         LaunchedEffect(screen, workoutState.phase, settings.keepScreenOn) {
@@ -296,11 +299,23 @@ private fun WorkoutScreen(
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         // Minimal, low-weight context line — round/section info is secondary to timing+action.
-        Text(
-            "${if (s.isRest) "REST" else s.sectionTitle.uppercase()} · ${s.roundLabel.substringAfter("— ").ifBlank { s.roundLabel }}",
-            fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f),
-            textAlign = TextAlign.Center, maxLines = 1
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                "${if (s.isRest) "REST" else s.sectionTitle.uppercase()} · ${s.roundLabel.substringAfter("— ").ifBlank { s.roundLabel }}",
+                fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f),
+                textAlign = TextAlign.Center, maxLines = 1
+            )
+            // Trigger-word legend for this round: e.g. "Go → jab, cross · Down → two squats"
+            if (s.legend.isNotBlank() && !s.isRest) {
+                Text(
+                    s.legend,
+                    fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.75f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        }
 
         Text(
             "%d:%02d".format(s.secondsLeft / 60, s.secondsLeft % 60),
@@ -365,7 +380,10 @@ private fun HistoryScreen(entries: List<HistoryEntry>) {
 
 @Composable
 private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
         Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold)
 
         SectionHeader("Voice")
@@ -374,6 +392,39 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         }
         Text("Duck music lowers Spotify / YouTube Music while cues are spoken.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        // ---- Voice picker ----
+        val voices = remember { WorkoutEngine.tts?.availableVoices() ?: emptyList() }
+        if (voices.isNotEmpty()) {
+            var expanded by remember { mutableStateOf(false) }
+            val currentLabel = voices.firstOrNull { it.name == s.voiceName }
+                ?.let { friendlyVoiceName(it.name) } ?: "Auto (best available)"
+            Box {
+                OutlinedButton(onClick = { expanded = true }, Modifier.fillMaxWidth()) {
+                    Text("Coach voice: $currentLabel")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Auto (best available)") },
+                        onClick = {
+                            expanded = false
+                            onChange(s.copy(voiceName = ""))
+                            WorkoutEngine.tts?.setVoice("", preview = true)
+                        })
+                    voices.forEach { v ->
+                        DropdownMenuItem(
+                            text = { Text(friendlyVoiceName(v.name)) },
+                            onClick = {
+                                expanded = false
+                                onChange(s.copy(voiceName = v.name))
+                                WorkoutEngine.tts?.setVoice(v.name, preview = true)
+                            })
+                    }
+                }
+            }
+            Text("Picking a voice plays a short preview. Only voices installed on the phone are listed — install more under Android Settings → System → Languages → Text-to-speech.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
 
         SectionHeader("Stance")
         SegmentedRow(listOf("Orthodox", "Southpaw"), s.stance.ordinal) {
@@ -394,6 +445,14 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
 
 // ---------------------------------------------------------------- shared widgets
 
+/** "en-gb-x-gbb-local" → "English (GB) — gbb". Best effort; raw name fallback. */
+private fun friendlyVoiceName(raw: String): String {
+    val parts = raw.split("-")
+    return if (parts.size >= 4 && parts[2] == "x") {
+        "English (${parts[1].uppercase()}) — ${parts[3]}"
+    } else raw
+}
+
 @Composable
 private fun SectionHeader(text: String) {
     Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
@@ -404,7 +463,7 @@ private fun SectionHeader(text: String) {
 private fun ToggleRow(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = 16.sp)
+        Text(label, fontSize = 16.sp, modifier = Modifier.weight(1f).padding(end = 8.dp))
         Switch(checked = value, onCheckedChange = onChange)
     }
 }

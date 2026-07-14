@@ -65,6 +65,14 @@ class WorkoutService : Service() {
         super.onDestroy()
     }
 
+    /** User swiped the app away — stop the workout and cut speech rather than
+     *  continuing to coach an empty room. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        WorkoutEngine.stop()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {

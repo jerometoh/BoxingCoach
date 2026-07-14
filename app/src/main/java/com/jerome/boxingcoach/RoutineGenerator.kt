@@ -5,22 +5,23 @@ import kotlin.random.Random
 /**
  * Generates a full routine from params.
  *
- * Round model (call-and-response): each work round is assigned ONE combo, or
- * TWO for later/harder rounds, announced in full before the round starts (an
- * "intro" cue at t=0). During the round, only short trigger words are called:
- *  - "Go" (or "Go one" / "Go two" when two combos are assigned) — throw the
- *    assigned combo.
- *  - "Down — ..." — a quick conditioning move.
- *  - Spacing fillers ("Feint", "Jab, keep range", "Circle left"...) — used
- *    between attacks so the user isn't standing idle waiting on a command.
- * This keeps live listening simple: you already know the combo, you're just
- * waiting for the trigger, rather than parsing a new combo every few seconds.
- *
- * Escalation: round position + Difficulty controls combo complexity (tier) and
- * whether 1 or 2 combos are assigned. Intensity controls how densely commands
- * are called and how often "Down" appears, plus rest length.
+ * Round model (call-and-response): each work round is assigned ONE combo (or TWO
+ * for later/harder rounds) plus ONE fixed conditioning move, all announced in the
+ * round intro. The intro is delivered during the preceding rest (or at round start
+ * for the first round of a section) so the user has the mental picture before the
+ * bell. During the round, only short trigger words are called:
+ *  - attack word ("Go", "Hit", "Shoot" — varies per round; "<word> one/two" when
+ *    two combos are assigned)
+ *  - conditioning word ("Down", "Drop" — varies per round) for the round's fixed
+ *    conditioning move
+ *  - spacing fillers ("Feint", "Jab, keep range", "Circle left"...) in between.
+ * Each round carries a `legend` string mapping its trigger words to their meaning,
+ * shown on the workout screen.
  */
 object RoutineGenerator {
+
+    private val attackWords = listOf("Go", "Hit", "Shoot")
+    private val downWords = listOf("Down", "Drop")
 
     fun generate(params: RoutineParams, stance: Stance, seed: Long = System.nanoTime()): Routine {
         val rng = Random(seed)
@@ -150,9 +151,8 @@ object RoutineGenerator {
         }
         val comboCount = if (rng.nextFloat() < twoComboChance) 2 else 1
 
-        // ---- Pick the assigned combo(s) ----
+        // ---- Pick the assigned combo(s) and this round's fixed conditioning move ----
         fun pickCombo(): String {
-            // Advanced/high-tier rounds occasionally draw a combo+movement pattern instead of a plain combo.
             return if (tier >= 3 && p.difficulty == Difficulty.ADVANCED && rng.nextFloat() < 0.35f) {
                 ComboLibrary.comboWithMovement.random(rng)
             } else {
@@ -162,17 +162,27 @@ object RoutineGenerator {
         }
         val assigned = (1..comboCount).map { pickCombo() }.distinct().ifEmpty { listOf(pickCombo()) }
         val renderedCombos = assigned.map { ComboLibrary.render(it, stance) }
+        val downMove = ComboLibrary.render(ComboLibrary.downMoves.random(rng), stance)
+
+        // ---- This round's trigger vocabulary ----
+        val goWord = attackWords.random(rng)
+        val downWord = downWords.random(rng)
 
         val label = "${sectionNoun(type)} — Round ${index + 1} of $total"
 
-        // ---- Intro cue: explain the round before it starts ----
+        // ---- Intro (delivered by the engine during preceding rest, or at round start) ----
         val introText = if (renderedCombos.size == 1) {
-            "This round: focus on ${renderedCombos[0]}. When I say go, throw it. " +
-                "Feint and jab to hold range in between. When I say down, hit the floor for a quick move."
+            "One combo: ${renderedCombos[0]}. On \"$goWord\", throw it. " +
+                "Feint and jab to hold range in between. On \"$downWord\": $downMove."
         } else {
-            "This round, two combos. One: ${renderedCombos[0]}. Two: ${renderedCombos[1]}. " +
-                "When I call go one or go two, throw that combo. Feint and jab in between to hold range. " +
-                "When I say down, hit the floor for a quick move."
+            "Two combos. One: ${renderedCombos[0]}. Two: ${renderedCombos[1]}. " +
+                "On \"$goWord one\" or \"$goWord two\", throw that combo. " +
+                "Feint and jab in between. On \"$downWord\": $downMove."
+        }
+        val legend = if (renderedCombos.size == 1) {
+            "$goWord → ${renderedCombos[0]}   ·   $downWord → $downMove"
+        } else {
+            "$goWord 1 → ${renderedCombos[0]}   ·   $goWord 2 → ${renderedCombos[1]}   ·   $downWord → $downMove"
         }
         val cues = mutableListOf(Cue(0, introText, isIntro = true))
 
@@ -187,30 +197,27 @@ object RoutineGenerator {
             Intensity.MEDIUM -> if (progress > 0.4f) 0.16f else 0.10f
             Intensity.HIGH -> if (progress > 0.2f) 0.26f else 0.16f
         }
-        val introReserve = 6 // seconds to let the intro line finish before commands start
+        val introReserve = 8 // seconds before the first command
         var t = introReserve
         var goToggle = false
-        while (t < durationSec - 6) {
+        while (t < durationSec - 12) {
             val roll = rng.nextFloat()
             val text = when {
-                roll < downRatio -> ComboLibrary.render(ComboLibrary.downCommands.random(rng), stance)
+                roll < downRatio -> downWord
                 roll < downRatio + 0.35f -> ComboLibrary.render(ComboLibrary.spacingCues.random(rng), stance)
                 else -> {
                     if (renderedCombos.size == 2) {
                         goToggle = !goToggle
-                        if (goToggle) "Go one" else "Go two"
-                    } else "Go"
+                        if (goToggle) "$goWord one" else "$goWord two"
+                    } else goWord
                 }
             }
             cues += Cue(t, text, isCommand = true)
             t += rng.nextInt(gapRange.first, gapRange.last + 1)
         }
-        if (p.intensity == Intensity.HIGH && durationSec >= 60) {
-            cues += Cue(durationSec - 15, "Last fifteen seconds — empty the tank!", isCommand = true)
-        }
 
-        val summary = "Tier $tier · " + renderedCombos.joinToString(" / ")
-        return Round(label, durationSec, cues, summary)
+        val summary = "Tier $tier · " + renderedCombos.joinToString(" / ") + " · $downWord: $downMove"
+        return Round(label, durationSec, cues, summary, legend = legend)
     }
 
     private fun sectionNoun(type: SectionType) = when (type) {

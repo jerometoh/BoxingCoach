@@ -36,6 +36,7 @@ class SettingsStore(context: Context) {
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
         warnSound = prefs.getBoolean("warnSound", true),
         endBell = prefs.getBoolean("endBell", true),
+        voiceName = prefs.getString("voiceName", "")!!,
     )
 
     fun save(s: AppSettings) {
@@ -47,6 +48,7 @@ class SettingsStore(context: Context) {
             .putBoolean("keepScreenOn", s.keepScreenOn)
             .putBoolean("warnSound", s.warnSound)
             .putBoolean("endBell", s.endBell)
+            .putString("voiceName", s.voiceName)
             .apply()
     }
 

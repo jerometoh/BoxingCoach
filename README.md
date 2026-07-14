@@ -76,7 +76,43 @@ automatically — no computer needed at any point.
 The app requests notification permission (for the workout foreground notification)
 and microphone permission (only used if you enable experimental voice commands).
 
-## What changed since the first build
+## Changelog
+
+### v3
+- **Fixed signing key** (`keystore/debug.keystore`, committed to the repo): every
+  build now has the same signature, so from this version onward new APKs install
+  **over** the old one — no more uninstalling, and workout history survives updates.
+  (You'll need one last uninstall/reinstall to get from the differently-signed v2
+  to this one.)
+- **Intros moved to rest time**: each round's combo assignment is now spoken during
+  the preceding rest ("Next: Heavy bag — Round 3 of 6. Two combos. One: ...") so you
+  have the picture before the bell. The first round of a section gets its intro at
+  the start of the round.
+- **Skip / End / app close now cut speech instantly** instead of letting queued
+  lines finish. Swiping the app away also stops the workout entirely.
+- **Time callouts during rounds**, phrased with variety: halfway, one minute left,
+  thirty seconds, 10-second warning, and a spoken 3-2-1 at the very end of each round.
+- **Real boxing sounds, synthesized in code**: the round bell is now a metallic
+  "ding-ding" ring (not a beep) and the 10-second warning is the wooden triple-clack
+  clapper used in boxing gyms. The clapper always fires at 10 s (when enabled);
+  a spoken "ten seconds" line rides along only some of the time. Both remain
+  toggleable in Settings. These are synthesized, so they're close to — not identical
+  to — recorded gym sounds; swapping in real recordings is possible later if wanted.
+- **Voice picker in Settings**: choose any English voice installed on the phone,
+  with a spoken preview on selection. Note: named celebrity voices (e.g. Terry
+  Crews) aren't possible — Android TTS only offers the generic voices installed on
+  the device, and cloning a real person's voice would raise consent/licensing
+  problems besides. Best available option: install more Google TTS voices on the
+  phone (Android Settings → System → Languages → Text-to-speech output → install
+  voice data) and pick the deepest one in the app's picker.
+- **Trigger legend on the workout screen**: a compact line under the round label
+  shows this round's mapping, e.g. `Go 1 → jab, cross · Go 2 → left hook, cross ·
+  Down → two squats`. Trigger words themselves now vary round to round (Go/Hit/Shoot,
+  Down/Drop) and each round has ONE fixed conditioning move, stated in the intro.
+- **Settings layout fixed**: toggle labels no longer wrap in a way that detached a
+  switch from its label (the "stray toggle"), and the screen scrolls.
+
+### v2
 
 - **Screen stays on during a workout** (Settings → "Keep screen on", default on) —
   only while a workout is actively showing on screen; normal battery behaviour resumes
