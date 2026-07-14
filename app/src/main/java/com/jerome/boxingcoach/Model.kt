@@ -68,4 +68,5 @@ data class AppSettings(
     val warnSound: Boolean = true,        // clapper sound at 10 seconds remaining
     val endBell: Boolean = true,          // ring bell at round changes
     val voiceName: String = "",           // TTS voice identifier; empty = auto-pick best
+    val tryEmbeddedVoice: Boolean = false, // opt-in: attempt the bundled neural voice (experimental — can crash on some devices)
 )

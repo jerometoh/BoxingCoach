@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
         settingsStore = SettingsStore(this)
         historyStore = HistoryStore(this)
         SoundFx.init(applicationContext)
-        CoachVoice.init(applicationContext)
+        CoachVoice.init(applicationContext, attemptEmbedded = settingsStore.load().tryEmbeddedVoice)
         WorkoutEngine.tts = CoachVoice.active
 
         // First-launch permissions
@@ -75,6 +75,9 @@ class MainActivity : ComponentActivity() {
             WorkoutEngine.warnSound = settings.warnSound
             WorkoutEngine.endBell = settings.endBell
             CoachVoice.systemEngine?.setVoice(settings.voiceName)
+            if (settings.tryEmbeddedVoice) {
+                CoachVoice.init(this@MainActivity, attemptEmbedded = true)
+            }
         }
         // Keep the screen awake only while a workout is actually on screen and running
         LaunchedEffect(screen, workoutState.phase, settings.keepScreenOn) {
@@ -396,13 +399,21 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         Text("Duck music lowers Spotify / YouTube Music while cues are spoken.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        // ---- Voice: embedded neural voice (if bundled) takes priority over system TTS ----
-        if (CoachVoice.usingEmbedded) {
-            Text("Using the embedded coach voice (offline neural voice bundled in the app — no phone setup needed).",
-                fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
-        } else {
-            Text("No embedded voice is bundled yet — using your phone's system voice. See README \"Embedded voice\" to add one.",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // ---- Voice: embedded neural voice is opt-in — it crashed on launch for some
+        // devices when auto-loaded, likely a native-level fault in the third-party
+        // library that no in-app error handling can fully guard against. ----
+        ToggleRow("Try embedded coach voice (experimental)", s.tryEmbeddedVoice) {
+            onChange(s.copy(tryEmbeddedVoice = it))
+        }
+        Text(
+            if (CoachVoice.embeddedLoadFailed) "Embedded voice failed to load last attempt — using system voice."
+            else if (CoachVoice.usingEmbedded) "Using the embedded coach voice (offline neural voice bundled in the app)."
+            else "Off by default: this crashed on launch for at least one device. Turning it on loads the bundled model in the background — if it's going to crash, it'll do so shortly after you enable it, not silently later.",
+            fontSize = 12.sp,
+            color = if (CoachVoice.usingEmbedded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (!CoachVoice.usingEmbedded) {
             val voices = remember { CoachVoice.systemEngine?.availableVoices() ?: emptyList() }
             if (voices.isNotEmpty()) {
                 var expanded by remember { mutableStateOf(false) }

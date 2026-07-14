@@ -37,6 +37,7 @@ class SettingsStore(context: Context) {
         warnSound = prefs.getBoolean("warnSound", true),
         endBell = prefs.getBoolean("endBell", true),
         voiceName = prefs.getString("voiceName", "")!!,
+        tryEmbeddedVoice = prefs.getBoolean("tryEmbeddedVoice", false),
     )
 
     fun save(s: AppSettings) {
@@ -49,6 +50,7 @@ class SettingsStore(context: Context) {
             .putBoolean("warnSound", s.warnSound)
             .putBoolean("endBell", s.endBell)
             .putString("voiceName", s.voiceName)
+            .putBoolean("tryEmbeddedVoice", s.tryEmbeddedVoice)
             .apply()
     }
 

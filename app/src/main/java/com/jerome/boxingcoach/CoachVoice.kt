@@ -26,11 +26,12 @@ object CoachVoice {
     val active: SpeechEngine? get() = embeddedEngine ?: systemEngine
     val usingEmbedded: Boolean get() = embeddedEngine != null
 
-    /** Non-blocking. Safe to call every onCreate — no-ops if already loaded/loading. */
-    fun init(context: Context) {
+    /** Non-blocking. Safe to call repeatedly — no-ops if already loaded/loading/disabled. */
+    fun init(context: Context, attemptEmbedded: Boolean) {
         if (systemEngine == null) systemEngine = TtsManager(context)
         WorkoutEngine.tts = active // system engine immediately, so the app is usable right away
 
+        if (!attemptEmbedded) return
         if (embeddedEngine == null && !embeddedLoadFailed) {
             val appContext = context.applicationContext
             Thread({
