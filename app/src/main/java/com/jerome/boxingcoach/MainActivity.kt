@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         settingsStore = SettingsStore(this)
         historyStore = HistoryStore(this)
+        SoundFx.init(applicationContext)
         if (WorkoutEngine.tts == null) WorkoutEngine.tts = TtsManager(applicationContext)
 
         // First-launch permissions
@@ -207,7 +208,8 @@ private fun SetupScreen(
             SegmentedRow(Intensity.entries.map { it.name.lowercase().replaceFirstChar(Char::uppercase) },
                 params.intensity.ordinal) { onParams(params.copy(intensity = Intensity.entries[it])) }
         }
-        item { Stepper("Base rest between rounds (sec)", params.restSec, 30, 120, step = 15) { onParams(params.copy(restSec = it)) } }
+        item { Stepper("Rest between rounds (sec)", params.restSec, 30, 120, step = 15) { onParams(params.copy(restSec = it)) } }
+        item { Stepper("Rest between segments — gear change (sec)", params.restBetweenSectionsSec, 30, 300, step = 30) { onParams(params.copy(restBetweenSectionsSec = it)) } }
 
         item {
             Button(onClick = onGenerate, modifier = Modifier.fillMaxWidth().height(56.dp)) {

@@ -78,6 +78,52 @@ and microphone permission (only used if you enable experimental voice commands).
 
 ## Changelog
 
+### v4
+- **Rest between rounds vs. between segments, both configurable** (Setup screen):
+  "Rest between rounds" (default 60s) applies between rounds within shadow boxing
+  or heavy bag; a new "Rest between segments" break (default 120s) is inserted
+  between warm-up → shadow → bag → core → cool-down so there's real time to put on
+  or strip off gloves/wraps. As before, the next segment's round-1 instructions are
+  spoken partway through that break, not counted against round time.
+- **10-second warning simplified**: now just the clapper sound plus one plain
+  "Ten seconds remaining" line — no more randomized hype phrasing at that moment
+  (the earlier variety pool is still used for the halfway/1-minute/30-second
+  callouts, just not at 10s per your feedback).
+- **Real audio clips, if you want to add them**: the app now checks for
+  `app/src/main/res/raw/bell.mp3` and `app/src/main/res/raw/clapper.mp3` at
+  startup and plays those instead of the synthesized tones when present — no code
+  changes needed on your end, just drop the files in and rebuild. I can't
+  download binary audio myself (no network access in my build environment), but
+  here are CC0 (public-domain-equivalent, no attribution required) sources I
+  found:
+  - Bell: https://bigsoundbank.com/boxing-bell-1-s1926.html (or -2, -3 on the same
+    site — pick whichever ring you like)
+  - Clapper/clacker: https://bigsoundbank.com/clapperboard-s1011.html or
+    https://freesound.org/people/uEffects/sounds/207867/
+  To add them from Termux: download the mp3 to your phone, then
+  ```
+  cd ~/BoxingCoach
+  mkdir -p app/src/main/res/raw
+  cp ~/storage/downloads/<file>.mp3 app/src/main/res/raw/bell.mp3     # rename accordingly
+  cp ~/storage/downloads/<file2>.mp3 app/src/main/res/raw/clapper.mp3
+  git add -A && git commit -m "add real bell/clapper clips" && git push
+  ```
+  Resource filenames must be lowercase letters/numbers/underscore only. Without
+  these files the app falls back to the synthesized tones automatically — nothing
+  breaks either way.
+- **On the voice**: Android's stock TTS engines (Google, Samsung) are genuinely
+  limited in expressiveness — no amount of rate/pitch tuning in-app fixes that, and
+  a Terry-Crews-specific voice isn't something I can build (see v3 notes on
+  consent/licensing). The most promising real option I found: **VoxSherpa**
+  (open-source, on GitHub: github.com/CodeBySonu95/VoxSherpa-TTS), a free Android
+  app that runs the open-source Piper and Kokoro neural TTS models fully offline
+  and registers them as a normal system TTS engine. If you install it and set it
+  as your phone's default TTS engine (Settings → System → Languages → Text-to-speech
+  output → Preferred engine), its voices should automatically show up in this
+  app's Settings → voice picker — no code change needed here, since the picker
+  just lists whatever the system TTS engine offers. Worth trying; I haven't been
+  able to test it myself.
+
 ### v3
 - **Fixed signing key** (`keystore/debug.keystore`, committed to the repo): every
   build now has the same signature, so from this version onward new APKs install

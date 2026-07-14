@@ -39,20 +39,32 @@ object RoutineGenerator {
         if (params.includeCore) sections += core(params.coreSec, rng, stance)
         if (params.includeCooldown) sections += cooldown(rng)
 
-        return Routine(params = params, sections = sections)
+        val withBreaks = sections.mapIndexed { i, sec ->
+            if (i < sections.size - 1) sec.copy(rounds = sec.rounds + sectionBreak(params.restBetweenSectionsSec))
+            else sec
+        }
+        return Routine(params = params, sections = withBreaks)
     }
+
+    private fun sectionBreak(sec: Int) = Round(
+        "Break", sec, emptyList(), "Break — swap gear for the next segment", isRest = true
+    )
 
     /** Regenerate one section of an existing routine, keeping the rest. */
     fun regenerateSection(routine: Routine, sectionIndex: Int, stance: Stance): Routine {
         val p = routine.params
         val rng = Random(System.nanoTime())
         val old = routine.sections[sectionIndex]
-        val fresh = when (old.type) {
+        var fresh = when (old.type) {
             SectionType.WARMUP -> warmup(rng, stance)
             SectionType.SHADOW -> workSection(SectionType.SHADOW, old.title, p.shadowRounds, p.shadowRoundSec, p, stance, rng)
             SectionType.BAG -> workSection(SectionType.BAG, old.title, p.bagRounds, p.bagRoundSec, p, stance, rng)
             SectionType.CORE -> core(p.coreSec, rng, stance)
             SectionType.COOLDOWN -> cooldown(rng)
+        }
+        // Keep the trailing gear-change break if this isn't the last section.
+        if (sectionIndex < routine.sections.size - 1) {
+            fresh = fresh.copy(rounds = fresh.rounds + sectionBreak(p.restBetweenSectionsSec))
         }
         val newSections = routine.sections.toMutableList().also { it[sectionIndex] = fresh }
         return routine.copy(sections = newSections)

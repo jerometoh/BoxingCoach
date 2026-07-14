@@ -1,26 +1,71 @@
 package com.jerome.boxingcoach
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaPlayer
+import java.lang.ref.WeakReference
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Synthesizes boxing gym sounds in code (no bundled audio files):
- *  - bell(): a metallic ring built from inharmonic partials with a sharp strike
- *    transient and long decay — reads as a real ring bell, not a beep.
- *    ringBell() plays the classic double "ding-ding".
- *  - clapper(): the wooden 10-second warning clacker — three sharp broadband
- *    clacks in quick succession.
+ * Plays boxing gym sounds. Prefers real audio clips dropped in
+ * app/src/main/res/raw/ (bell.mp3, clapper.mp3) if present — see README for
+ * where to get CC0 clips and how to add them. Falls back to a synthesized
+ * approximation (metallic ring / wooden triple-clack) when no clip is bundled,
+ * so the app always works even with nothing added.
  *
- * Plays on the media stream so it follows the same output route as music/TTS.
+ * Call SoundFx.init(context) once (MainActivity.onCreate) before use.
  */
 object SoundFx {
 
     private const val SR = 44100
+    private var appContext: WeakReference<Context>? = null
+
+    fun init(context: Context) {
+        appContext = WeakReference(context.applicationContext)
+    }
+
+    private fun rawResId(name: String): Int {
+        val ctx = appContext?.get() ?: return 0
+        return runCatching { ctx.resources.getIdentifier(name, "raw", ctx.packageName) }.getOrDefault(0)
+    }
+
+    /** Play a bundled clip by raw resource name; returns true if one was found and started. */
+    private fun playClip(name: String): Boolean {
+        val ctx = appContext?.get() ?: return false
+        val id = rawResId(name)
+        if (id == 0) return false
+        return runCatching {
+            val mp = MediaPlayer.create(ctx, id) ?: return false
+            mp.setOnCompletionListener { it.release() }
+            mp.start()
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Classic boxing round bell: "ding-ding". Uses res/raw/bell.mp3 if present. */
+    fun ringBell() {
+        if (playClip("bell")) return
+        play(concat(bellSamples(0.6), silence(0.05), bellSamples(1.4)))
+    }
+
+    /** Single longer ring (workout complete etc). Uses res/raw/bell.mp3 if present. */
+    fun singleBell() {
+        if (playClip("bell")) return
+        play(bellSamples(1.6, amp = 0.6))
+    }
+
+    /** Boxing clapper — 10-seconds-left warning. Uses res/raw/clapper.mp3 if present. */
+    fun clapper() {
+        if (playClip("clapper")) return
+        play(concat(clackSamples(), silence(0.11), clackSamples(), silence(0.11), clackSamples()))
+    }
+
+    // ---------------------------------------------------------- synthesized fallback
 
     private fun play(samples: ShortArray) {
         val track = AudioTrack.Builder()
@@ -95,20 +140,5 @@ object SoundFx {
         var pos = 0
         for (p in parts) { p.copyInto(out, pos); pos += p.size }
         return out
-    }
-
-    /** Classic boxing round bell: "ding-ding". */
-    fun ringBell() {
-        play(concat(bellSamples(0.6), silence(0.05), bellSamples(1.4)))
-    }
-
-    /** Single longer ring (workout complete etc.). */
-    fun singleBell() {
-        play(bellSamples(1.6, amp = 0.6))
-    }
-
-    /** Boxing clapper: three fast wooden clacks (the 10-seconds-left warning). */
-    fun clapper() {
-        play(concat(clackSamples(), silence(0.11), clackSamples(), silence(0.11), clackSamples()))
     }
 }

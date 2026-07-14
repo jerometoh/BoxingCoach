@@ -105,9 +105,6 @@ object WorkoutEngine {
     private val thirtyLines = listOf(
         "Thirty seconds.", "Thirty left — finish strong.", "Half a minute. Dig in."
     )
-    private val tenLines = listOf(
-        "Ten seconds — all out!", "Last ten — empty the tank!", "Ten! Everything you've got!"
-    )
 
     private suspend fun run(r: Routine) {
         var elapsed = 0
@@ -129,8 +126,12 @@ object WorkoutEngine {
 
             val announce: String
             if (round.isRest) {
-                val tip = if (restCoaching) " " + ComboLibrary.restTips.random(rng) else ""
-                announce = "Rest. ${round.durationSec} seconds.$tip"
+                announce = if (round.label == "Break") {
+                    "Break. Swap your gear. ${niceDuration(round.durationSec)}."
+                } else {
+                    val tip = if (restCoaching) " " + ComboLibrary.restTips.random(rng) else ""
+                    "Rest. ${round.durationSec} seconds.$tip"
+                }
             } else {
                 val preDelivered = slotIdx in introDelivered
                 val intro = round.cues.firstOrNull { it.isIntro }
@@ -199,8 +200,7 @@ object WorkoutEngine {
                         d >= 90 && left == 30 -> tts?.speak(thirtyLines.random(rng))
                         d >= 30 && left == 10 -> {
                             if (warnSound) SoundFx.clapper()
-                            // Voice line rides along only sometimes; the clapper is the constant.
-                            if (rng.nextFloat() < 0.6f) tts?.speak(tenLines.random(rng))
+                            tts?.speak("Ten seconds remaining.")
                         }
                         left in 1..3 -> tts?.speak("$left")
                     }

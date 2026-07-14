@@ -18,6 +18,7 @@ data class RoutineParams(
     val bagRoundSec: Int = 180,
     val coreSec: Int = 300,
     val restSec: Int = 60,
+    val restBetweenSectionsSec: Int = 120,
     val difficulty: Difficulty = Difficulty.INTERMEDIATE,
     val intensity: Intensity = Intensity.MEDIUM,
 )
