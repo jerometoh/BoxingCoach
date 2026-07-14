@@ -22,12 +22,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * voice name); empty selection auto-picks the highest-quality offline voice.
  * cut() flushes any speech in progress immediately (used by skip/stop).
  */
-class TtsManager(context: Context) {
+class TtsManager(context: Context) : SpeechEngine {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var ready = false
     private val pending = AtomicInteger(0)
-    var voiceMode: VoiceMode = VoiceMode.DUCK_MUSIC
+    override var voiceMode: VoiceMode = VoiceMode.DUCK_MUSIC
 
     private var requestedVoiceName: String = ""
 
@@ -88,7 +88,7 @@ class TtsManager(context: Context) {
         }
     }
 
-    fun speak(text: String) {
+    override fun speak(text: String) {
         if (!ready || voiceMode == VoiceMode.TEXT_ONLY) return
         if (voiceMode == VoiceMode.DUCK_MUSIC) {
             audioManager.requestAudioFocus(focusRequest)
@@ -98,7 +98,7 @@ class TtsManager(context: Context) {
     }
 
     /** Immediately cut any speech in progress and drop everything queued. */
-    fun cut() {
+    override fun cut() {
         tts.stop()
         pending.set(0)
         audioManager.abandonAudioFocusRequest(focusRequest)

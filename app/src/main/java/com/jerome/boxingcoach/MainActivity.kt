@@ -44,7 +44,8 @@ class MainActivity : ComponentActivity() {
         settingsStore = SettingsStore(this)
         historyStore = HistoryStore(this)
         SoundFx.init(applicationContext)
-        if (WorkoutEngine.tts == null) WorkoutEngine.tts = TtsManager(applicationContext)
+        CoachVoice.init(applicationContext)
+        WorkoutEngine.tts = CoachVoice.active
 
         // First-launch permissions
         val wanted = mutableListOf<String>()
@@ -73,7 +74,7 @@ class MainActivity : ComponentActivity() {
             WorkoutEngine.restCoaching = settings.restCoaching
             WorkoutEngine.warnSound = settings.warnSound
             WorkoutEngine.endBell = settings.endBell
-            WorkoutEngine.tts?.setVoice(settings.voiceName)
+            CoachVoice.systemEngine?.setVoice(settings.voiceName)
         }
         // Keep the screen awake only while a workout is actually on screen and running
         LaunchedEffect(screen, workoutState.phase, settings.keepScreenOn) {
@@ -395,37 +396,44 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         Text("Duck music lowers Spotify / YouTube Music while cues are spoken.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        // ---- Voice picker ----
-        val voices = remember { WorkoutEngine.tts?.availableVoices() ?: emptyList() }
-        if (voices.isNotEmpty()) {
-            var expanded by remember { mutableStateOf(false) }
-            val currentLabel = voices.firstOrNull { it.name == s.voiceName }
-                ?.let { friendlyVoiceName(it.name) } ?: "Auto (best available)"
-            Box {
-                OutlinedButton(onClick = { expanded = true }, Modifier.fillMaxWidth()) {
-                    Text("Coach voice: $currentLabel")
-                }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Auto (best available)") },
-                        onClick = {
-                            expanded = false
-                            onChange(s.copy(voiceName = ""))
-                            WorkoutEngine.tts?.setVoice("", preview = true)
-                        })
-                    voices.forEach { v ->
+        // ---- Voice: embedded neural voice (if bundled) takes priority over system TTS ----
+        if (CoachVoice.usingEmbedded) {
+            Text("Using the embedded coach voice (offline neural voice bundled in the app — no phone setup needed).",
+                fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+        } else {
+            Text("No embedded voice is bundled yet — using your phone's system voice. See README \"Embedded voice\" to add one.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val voices = remember { CoachVoice.systemEngine?.availableVoices() ?: emptyList() }
+            if (voices.isNotEmpty()) {
+                var expanded by remember { mutableStateOf(false) }
+                val currentLabel = voices.firstOrNull { it.name == s.voiceName }
+                    ?.let { friendlyVoiceName(it.name) } ?: "Auto (best available)"
+                Box {
+                    OutlinedButton(onClick = { expanded = true }, Modifier.fillMaxWidth()) {
+                        Text("System voice: $currentLabel")
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         DropdownMenuItem(
-                            text = { Text(friendlyVoiceName(v.name)) },
+                            text = { Text("Auto (best available)") },
                             onClick = {
                                 expanded = false
-                                onChange(s.copy(voiceName = v.name))
-                                WorkoutEngine.tts?.setVoice(v.name, preview = true)
+                                onChange(s.copy(voiceName = ""))
+                                CoachVoice.systemEngine?.setVoice("", preview = true)
                             })
+                        voices.forEach { v ->
+                            DropdownMenuItem(
+                                text = { Text(friendlyVoiceName(v.name)) },
+                                onClick = {
+                                    expanded = false
+                                    onChange(s.copy(voiceName = v.name))
+                                    CoachVoice.systemEngine?.setVoice(v.name, preview = true)
+                                })
+                        }
                     }
                 }
+                Text("Picking a voice plays a short preview. Only voices installed on the phone are listed.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("Picking a voice plays a short preview. Only voices installed on the phone are listed — install more under Android Settings → System → Languages → Text-to-speech.",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         SectionHeader("Stance")

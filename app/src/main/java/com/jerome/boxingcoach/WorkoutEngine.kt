@@ -47,7 +47,7 @@ object WorkoutEngine {
     private val _state = MutableStateFlow(WorkoutState())
     val state: StateFlow<WorkoutState> = _state
 
-    var tts: TtsManager? = null
+    var tts: SpeechEngine? = null
     var restCoaching: Boolean = true
     var warnSound: Boolean = true
     var endBell: Boolean = true

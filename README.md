@@ -78,6 +78,56 @@ and microphone permission (only used if you enable experimental voice commands).
 
 ## Changelog
 
+### v5 — embedded voice (no phone-side TTS setup)
+Added a fully offline, bundled neural voice using the open-source **sherpa-onnx**
+library (runs Piper/VITS models via ONNX Runtime, entirely inside the app — MIT
+licensed). This replaces needing to install/configure a separate TTS app or dig
+through Android's system voice settings: once a model is added to the repo, it's
+baked into the APK and just works for anyone who installs it.
+
+**This is the riskiest change so far** — it's a third-party native library I
+couldn't compile-test in my build environment. The app is written to fail safe:
+if the model files aren't present, or anything about loading them goes wrong, it
+falls back to the system voice automatically (same as before) rather than
+crashing. If the Actions build itself fails to *compile*, though, that's a
+different kind of problem — send me the exact error from the failed step and
+it's almost certainly a small API signature fix, not a redesign.
+
+**To actually enable the embedded voice** (optional — the app works without this,
+just using system TTS as before):
+
+1. Pick a voice and download it (these are real, verified download links —
+   ~15–60MB each, MIT-licensed Piper voices with the espeak-ng phonemizer data
+   already bundled in):
+   ```
+   # Deep, energetic male options — pick one:
+   wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ryan-high.tar.bz2
+   # or:
+   wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alan-medium.tar.bz2
+   ```
+   If a specific filename 404s (voice lineup shifts over time), browse
+   https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models for the current
+   list — anything named `vits-piper-en_*` will work the same way.
+2. Extract and rename into place (from Termux, in the repo root):
+   ```
+   cd ~/BoxingCoach
+   mkdir -p app/src/main/assets/piper
+   tar xjf ~/storage/downloads/vits-piper-en_US-ryan-high.tar.bz2 -C ~/tmp_piper --strip-components=1
+   mv ~/tmp_piper/*.onnx app/src/main/assets/piper/model.onnx
+   mv ~/tmp_piper/tokens.txt app/src/main/assets/piper/tokens.txt
+   mv ~/tmp_piper/espeak-ng-data app/src/main/assets/piper/espeak-ng-data
+   rm -rf ~/tmp_piper ~/storage/downloads/vits-piper-*.tar.bz2
+   ```
+   (You may need `mkdir -p ~/tmp_piper` first if it doesn't exist, and
+   `pkg install tar -y` if `tar` isn't already available in Termux.)
+3. Commit and push as usual. The next build will bundle the model in the APK —
+   Settings will show "Using the embedded coach voice" once it's installed, and
+   the system-voice picker disappears (it's only relevant as the fallback).
+
+Note this adds real size to the APK (tens of MB, once) and this v1 only supports
+one bundled voice — no in-app picker between multiple embedded voices yet; that's
+a reasonable next step if the voice quality proves worth it.
+
 ### v4
 - **Rest between rounds vs. between segments, both configurable** (Setup screen):
   "Rest between rounds" (default 60s) applies between rounds within shadow boxing

@@ -52,4 +52,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.code.gson:gson:2.11.0")
+    // Embedded offline neural TTS (Piper/VITS models via ONNX Runtime) — no phone-side
+    // setup needed. App falls back to system TTS automatically if no model is bundled
+    // or this fails to load. See README "Embedded voice" section.
+    implementation("com.github.k2-fsa:sherpa-onnx-android:1.10.30")
 }
