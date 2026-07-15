@@ -19,7 +19,15 @@ mkdir -p "$HOME/tmp_boxingcoach"
 unzip -oq "$ZIP" -d "$HOME/tmp_boxingcoach"
 cp -r "$HOME/tmp_boxingcoach/BoxingCoach/." .
 rm -rf "$HOME/tmp_boxingcoach"
-rm -f "$HOME/storage/downloads/"BoxingCoach*.zip
+
+# Keep the zip we just applied (the newest); remove only older BoxingCoach zips.
+ZIP_NAME=$(basename "$ZIP")
+for f in "$HOME/storage/downloads/"BoxingCoach*.zip; do
+  [ -e "$f" ] || continue
+  [ "$(basename "$f")" = "$ZIP_NAME" ] && continue
+  echo "Removing older zip: $(basename "$f")"
+  rm -f "$f"
+done
 
 # Any APK already in Downloads is from a build that's about to be superseded —
 # clear it out now so old and new installs don't pile up waiting to be sorted.
