@@ -27,6 +27,7 @@ object RoutineGenerator {
         params: RoutineParams,
         stance: Stance,
         countReps: Boolean = true,
+        coaching: Boolean = true,
         seed: Long = System.nanoTime()
     ): Routine {
         val rng = Random(seed)
@@ -35,11 +36,11 @@ object RoutineGenerator {
         if (params.includeWarmup) sections += warmup(rng, stance, countReps)
         if (params.includeShadow) sections += workSection(
             SectionType.SHADOW, "Shadow boxing (no gloves)",
-            params.shadowRounds, params.shadowRoundSec, params, stance, rng
+            params.shadowRounds, params.shadowRoundSec, params, stance, rng, coaching
         )
         if (params.includeBag) sections += workSection(
             SectionType.BAG, "Heavy bag",
-            params.bagRounds, params.bagRoundSec, params, stance, rng
+            params.bagRounds, params.bagRoundSec, params, stance, rng, coaching
         )
         if (params.includeCore) sections += core(params.coreSec, rng, stance)
         if (params.includeCooldown) sections += cooldown(rng)
@@ -56,14 +57,14 @@ object RoutineGenerator {
     )
 
     /** Regenerate one section of an existing routine, keeping the rest. */
-    fun regenerateSection(routine: Routine, sectionIndex: Int, stance: Stance, countReps: Boolean = true): Routine {
+    fun regenerateSection(routine: Routine, sectionIndex: Int, stance: Stance, countReps: Boolean = true, coaching: Boolean = true): Routine {
         val p = routine.params
         val rng = Random(System.nanoTime())
         val old = routine.sections[sectionIndex]
         var fresh = when (old.type) {
             SectionType.WARMUP -> warmup(rng, stance, countReps)
-            SectionType.SHADOW -> workSection(SectionType.SHADOW, old.title, p.shadowRounds, p.shadowRoundSec, p, stance, rng)
-            SectionType.BAG -> workSection(SectionType.BAG, old.title, p.bagRounds, p.bagRoundSec, p, stance, rng)
+            SectionType.SHADOW -> workSection(SectionType.SHADOW, old.title, p.shadowRounds, p.shadowRoundSec, p, stance, rng, coaching)
+            SectionType.BAG -> workSection(SectionType.BAG, old.title, p.bagRounds, p.bagRoundSec, p, stance, rng, coaching)
             SectionType.CORE -> core(p.coreSec, rng, stance)
             SectionType.COOLDOWN -> cooldown(rng)
         }
@@ -76,18 +77,18 @@ object RoutineGenerator {
     }
 
     /** Regenerate a single work round within a section. */
-    fun regenerateRound(routine: Routine, sectionIndex: Int, roundIndex: Int, stance: Stance, countReps: Boolean = true): Routine {
+    fun regenerateRound(routine: Routine, sectionIndex: Int, roundIndex: Int, stance: Stance, countReps: Boolean = true, coaching: Boolean = true): Routine {
         val section = routine.sections[sectionIndex]
         val p = routine.params
         val rng = Random(System.nanoTime())
         if (section.type != SectionType.SHADOW && section.type != SectionType.BAG)
-            return regenerateSection(routine, sectionIndex, stance, countReps)
+            return regenerateSection(routine, sectionIndex, stance, countReps, coaching)
 
         val workRounds = section.rounds.filter { !it.isRest }
         val target = section.rounds[roundIndex]
         if (target.isRest) return routine
         val workIdx = workRounds.indexOf(target)
-        val fresh = workRound(section.type, workIdx, workRounds.size, target.durationSec, p, stance, rng)
+        val fresh = workRound(section.type, workIdx, workRounds.size, target.durationSec, p, stance, rng, coaching)
         val newRounds = section.rounds.toMutableList().also { it[roundIndex] = fresh }
         val newSections = routine.sections.toMutableList().also { it[sectionIndex] = section.copy(rounds = newRounds) }
         return routine.copy(sections = newSections)
@@ -217,17 +218,59 @@ object RoutineGenerator {
 
     private fun cooldown(rng: Random): Section {
         val moves = ComboLibrary.cooldownMoves.shuffled(rng).take(6)
-        val total = 240
-        val per = total / moves.size
-        val cues = moves.mapIndexed { i, m -> Cue(i * per, m) }
-        val round = Round("Cool-down", total, cues, "Static stretches and breathing — 4 min")
+        val cues = mutableListOf<Cue>()
+        val introReserve = 5
+        cues += Cue(0, listOf(
+            "Let's cool down. ${moves.size} stretches — ease into each one and breathe.",
+            "Cooling down: ${moves.size} stretches. Slow and gentle, don't force anything.",
+            "Cool-down time — ${moves.size} stretches. Long, easy breaths throughout."
+        ).random(rng))
+
+        var t = introReserve
+        moves.forEachIndexed { i, mv ->
+            val name = ComboLibrary.render(mv.text, stance = Stance.ORTHODOX) // no L/R tokens in cooldown text
+            val lead = when {
+                i == 0 -> "First"
+                i == moves.size - 1 -> "Last one"
+                else -> listOf("Next", "Now").random(rng)
+            }
+            when (mv.kind) {
+                ComboLibrary.MoveKind.PER_SIDE -> {
+                    // Hold one side, switch, hold the other.
+                    cues += Cue(t, "$lead: $name. Hold one side."); t += WARMUP_ANNOUNCE
+                    t += holdWithCountdown(cues, t, mv.holdSec)
+                    cues += Cue(t, "Switch sides."); t += WARMUP_SWITCH
+                    t += holdWithCountdown(cues, t, mv.holdSec)
+                    t += WARMUP_BREATH
+                }
+                else -> { // HOLD (and any REP treated as a hold here)
+                    cues += Cue(t, "$lead: $name."); t += WARMUP_ANNOUNCE
+                    t += holdWithCountdown(cues, t, mv.holdSec)
+                    t += WARMUP_BREATH
+                }
+            }
+        }
+        val total = t + 3
+        cues += Cue(total - 3, "That's your cool-down. Good work today.")
+        val round = Round("Cool-down", total, cues,
+            "Static stretches and breathing — ${moves.size} stretches, ${total / 60} min")
         return Section(SectionType.COOLDOWN, "Cool-down", listOf(round))
+    }
+
+    /** Emit a gentle spoken countdown over the last few seconds of a hold. Returns
+     *  the seconds consumed (== holdSec). Cues are placed on distinct whole seconds. */
+    private fun holdWithCountdown(cues: MutableList<Cue>, startT: Int, holdSec: Int): Int {
+        val cd = if (holdSec >= 8) 5 else 3
+        val quietBefore = (holdSec - cd).coerceAtLeast(0)
+        var tt = startT + quietBefore
+        for (n in cd downTo 1) { cues += Cue(tt, "$n…"); tt++ }
+        return holdSec
     }
 
     private fun workSection(
         type: SectionType, title: String,
         roundCount: Int, roundSec: Int,
-        p: RoutineParams, stance: Stance, rng: Random
+        p: RoutineParams, stance: Stance, rng: Random, coaching: Boolean = true
     ): Section {
         val rest = when (p.intensity) {
             Intensity.LOW -> p.restSec + 15
@@ -236,7 +279,7 @@ object RoutineGenerator {
         }
         val rounds = mutableListOf<Round>()
         for (i in 0 until roundCount) {
-            rounds += workRound(type, i, roundCount, roundSec, p, stance, rng)
+            rounds += workRound(type, i, roundCount, roundSec, p, stance, rng, coaching)
             if (i < roundCount - 1) rounds += Round(
                 "Rest", rest, emptyList(), "Rest — ${rest}s", isRest = true
             )
@@ -246,7 +289,7 @@ object RoutineGenerator {
 
     private fun workRound(
         type: SectionType, index: Int, total: Int, durationSec: Int,
-        p: RoutineParams, stance: Stance, rng: Random
+        p: RoutineParams, stance: Stance, rng: Random, coaching: Boolean = true
     ): Round {
         val progress = if (total <= 1) 1f else index.toFloat() / (total - 1)
 
@@ -280,7 +323,16 @@ object RoutineGenerator {
                 pool.random(rng).text
             }
         }
-        val assigned = (1..comboCount).map { pickCombo() }.distinct().ifEmpty { listOf(pickCombo()) }
+        // Pick `comboCount` distinct combos; re-roll duplicates instead of letting
+        // distinct() silently collapse a two-combo round back to one.
+        val assigned = mutableListOf<String>()
+        var guard = 0
+        while (assigned.size < comboCount && guard < 20) {
+            val c = pickCombo()
+            if (c !in assigned) assigned += c
+            guard++
+        }
+        if (assigned.isEmpty()) assigned += pickCombo()
         val renderedCombos = assigned.map { ComboLibrary.render(it, stance) }
         val downMove = ComboLibrary.render(ComboLibrary.downMoves.random(rng), stance)
 
@@ -295,7 +347,8 @@ object RoutineGenerator {
             "One combo: ${renderedCombos[0]}. On \"$goWord\", throw it. " +
                 "Feint and jab to hold range in between. On \"$downWord\": $downMove."
         } else {
-            "Two combos. One: ${renderedCombos[0]}. Two: ${renderedCombos[1]}. " +
+            "Two combos. Combo one: ${renderedCombos[0]}. Combo two: ${renderedCombos[1]}. " +
+                "Again — one is ${renderedCombos[0]}, two is ${renderedCombos[1]}. " +
                 "On \"$goWord one\" or \"$goWord two\", throw that combo. " +
                 "Feint and jab in between. On \"$downWord\": $downMove."
         }
@@ -318,22 +371,31 @@ object RoutineGenerator {
             Intensity.HIGH -> if (progress > 0.2f) 0.26f else 0.16f
         }
         val introReserve = 8 // seconds before the first command
+        // Chance that a given slot is a coaching tip rather than a command. Tips are
+        // spoken between combos (not on "Go"), replacing the old rest-period tips.
+        val coachRatio = if (coaching) 0.10f else 0f
         var t = introReserve
         var goToggle = false
         while (t < durationSec - 12) {
             val roll = rng.nextFloat()
-            val text = when {
-                roll < downRatio -> downWord
-                roll < downRatio + 0.35f -> ComboLibrary.render(ComboLibrary.spacingCues.random(rng), stance)
+            var extraGap = 0
+            val (text, isCmd) = when {
+                roll < coachRatio -> {
+                    extraGap = 3 // give the longer line room before the next command
+                    ComboLibrary.render(ComboLibrary.restTips.random(rng), stance) to false
+                }
+                roll < coachRatio + downRatio -> downWord to true
+                roll < coachRatio + downRatio + 0.32f ->
+                    ComboLibrary.render(ComboLibrary.spacingCues.random(rng), stance) to true
                 else -> {
                     if (renderedCombos.size == 2) {
                         goToggle = !goToggle
-                        if (goToggle) "$goWord one" else "$goWord two"
-                    } else goWord
+                        (if (goToggle) "$goWord one" else "$goWord two") to true
+                    } else goWord to true
                 }
             }
-            cues += Cue(t, text, isCommand = true)
-            t += rng.nextInt(gapRange.first, gapRange.last + 1)
+            cues += Cue(t, text, isCommand = isCmd)
+            t += rng.nextInt(gapRange.first, gapRange.last + 1) + extraGap
         }
 
         val summary = "Tier $tier · " + renderedCombos.joinToString(" / ") + " · $downWord: $downMove"

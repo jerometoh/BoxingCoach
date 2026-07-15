@@ -66,7 +66,7 @@ class TtsManager(context: Context) : SpeechEngine {
             if (ready) {
                 tts.language = Locale.UK
                 applyVoiceSelection()
-                tts.setSpeechRate(1.12f)
+                tts.setSpeechRate(BASE_RATE)
                 tts.setPitch(0.92f)
                 tts.setAudioAttributes(attrs)
                 tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -119,14 +119,19 @@ class TtsManager(context: Context) : SpeechEngine {
         }
     }
 
-    override fun speak(text: String) {
+    override fun speak(text: String, rateScale: Float) {
         if (!ready || voiceMode == VoiceMode.TEXT_ONLY) return
         if (voiceMode == VoiceMode.DUCK_MUSIC) {
             audioManager.requestAudioFocus(focusRequest)
         }
+        // Rate is snapshotted by the engine at speak() time, so setting it right
+        // before queuing applies to this utterance only.
+        tts.setSpeechRate(BASE_RATE * rateScale)
         pending.incrementAndGet()
         tts.speak(text, TextToSpeech.QUEUE_ADD, null, "cue-${System.nanoTime()}")
     }
+
+    override fun isSpeaking(): Boolean = pending.get() > 0 || tts.isSpeaking
 
     /** Immediately cut any speech in progress and drop everything queued. */
     override fun cut() {
@@ -147,5 +152,10 @@ class TtsManager(context: Context) : SpeechEngine {
     fun shutdown() {
         cut()
         tts.shutdown()
+    }
+
+    companion object {
+        /** Base speaking rate; per-utterance rateScale multiplies this. */
+        const val BASE_RATE = 1.12f
     }
 }

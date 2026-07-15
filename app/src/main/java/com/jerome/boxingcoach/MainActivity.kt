@@ -126,14 +126,14 @@ class MainActivity : ComponentActivity() {
                     Screen.SETUP -> SetupScreen(params,
                         onParams = { params = it; settingsStore.saveParams(it) },
                         onGenerate = {
-                            routine = RoutineGenerator.generate(params, settings.stance, settings.countReps)
+                            routine = RoutineGenerator.generate(params, settings.stance, settings.countReps, settings.restCoaching)
                             screen = Screen.REVIEW
                         })
                     Screen.REVIEW -> routine?.let { r ->
                         ReviewScreen(r,
-                            onRegenAll = { routine = RoutineGenerator.generate(params, settings.stance, settings.countReps) },
-                            onRegenSection = { si -> routine = RoutineGenerator.regenerateSection(r, si, settings.stance, settings.countReps) },
-                            onRegenRound = { si, ri -> routine = RoutineGenerator.regenerateRound(r, si, ri, settings.stance, settings.countReps) },
+                            onRegenAll = { routine = RoutineGenerator.generate(params, settings.stance, settings.countReps, settings.restCoaching) },
+                            onRegenSection = { si -> routine = RoutineGenerator.regenerateSection(r, si, settings.stance, settings.countReps, settings.restCoaching) },
+                            onRegenRound = { si, ri -> routine = RoutineGenerator.regenerateRound(r, si, ri, settings.stance, settings.countReps, settings.restCoaching) },
                             onBack = { screen = Screen.SETUP },
                             onStart = {
                                 WorkoutService.start(this@MainActivity)
@@ -524,7 +524,7 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
             onChange(s.copy(stance = Stance.entries[it]))
         }
 
-        ToggleRow("Coaching tips during rest", s.restCoaching) { onChange(s.copy(restCoaching = it)) }
+        ToggleRow("In-round coaching tips", s.restCoaching) { onChange(s.copy(restCoaching = it)) }
         ToggleRow("Count warm-up reps aloud", s.countReps) { onChange(s.copy(countReps = it)) }
         ToggleRow("Voice commands (experimental)", s.voiceCommands) { onChange(s.copy(voiceCommands = it)) }
         Text("Voice commands: say pause / go / skip / repeat. Accuracy drops with loud music — on-screen buttons always work.",

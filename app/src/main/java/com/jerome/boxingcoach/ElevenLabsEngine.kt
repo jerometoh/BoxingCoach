@@ -170,18 +170,23 @@ class ElevenLabsEngine(
         }
     }
 
-    override fun speak(text: String) {
+    override fun speak(text: String, rateScale: Float) {
         if (voiceMode == VoiceMode.TEXT_ONLY) return
+        // rateScale is not applied to pre-rendered clips; the cloud voice is already
+        // paced naturally. It's honoured when we fall back to system TTS below.
         playJob = scope.launch {
             val file = ensureAudio(text)
             if (file == null) {
                 // Nothing cached and couldn't generate → don't leave silence.
-                fallback.speak(text)
+                fallback.speak(text, rateScale)
                 return@launch
             }
             playFile(file)
         }
     }
+
+    override fun isSpeaking(): Boolean =
+        currentPlayer != null || playJob?.isActive == true || fallback.isSpeaking()
 
     private fun playFile(file: File) {
         runCatching {

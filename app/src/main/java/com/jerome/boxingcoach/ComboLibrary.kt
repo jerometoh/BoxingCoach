@@ -169,14 +169,14 @@ object ComboLibrary {
 
     // ---- Cool-down ----
     val cooldownMoves = listOf(
-        "Deep breaths — in through the nose, out through the mouth",
-        "Cross-body shoulder stretch, hold each side",
-        "Overhead triceps stretch, both sides",
-        "Standing quad stretch, each leg",
-        "Standing hamstring fold, hang loose",
-        "Chest opener against a wall or doorframe",
-        "Neck side stretch, gentle, both sides",
-        "Child's pose or deep squat hold — slow the breathing right down",
+        WarmupMove("Deep breaths — in through the nose, out through the mouth", MoveKind.HOLD, holdSec = 20),
+        WarmupMove("Cross-body shoulder stretch, hold it", MoveKind.PER_SIDE, secPerCount = 0, holdSec = 15),
+        WarmupMove("Overhead triceps stretch", MoveKind.PER_SIDE, secPerCount = 0, holdSec = 15),
+        WarmupMove("Standing quad stretch", MoveKind.PER_SIDE, secPerCount = 0, holdSec = 15),
+        WarmupMove("Standing hamstring fold, hang loose", MoveKind.HOLD, holdSec = 20),
+        WarmupMove("Chest opener against a wall or doorframe", MoveKind.HOLD, holdSec = 18),
+        WarmupMove("Neck side stretch, gentle", MoveKind.PER_SIDE, secPerCount = 0, holdSec = 12),
+        WarmupMove("Child's pose or deep squat hold — slow the breathing right down", MoveKind.HOLD, holdSec = 25),
     )
 
     // ---- Rest-period coaching lines ----

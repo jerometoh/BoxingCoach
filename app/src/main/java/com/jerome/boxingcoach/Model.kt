@@ -62,7 +62,7 @@ data class HistoryEntry(
 data class AppSettings(
     val voiceMode: VoiceMode = VoiceMode.DUCK_MUSIC,
     val stance: Stance = Stance.ORTHODOX,
-    val restCoaching: Boolean = true,     // spoken tips during rest vs tone only
+    val restCoaching: Boolean = true,     // in-round coaching tips (spoken between combos)
     val countReps: Boolean = true,        // count warm-up reps aloud ("1, 2, 3…") vs announce only
     val voiceCommands: Boolean = false,   // experimental hands-free control
     val keepScreenOn: Boolean = true,     // prevent screen dimming/locking during workout

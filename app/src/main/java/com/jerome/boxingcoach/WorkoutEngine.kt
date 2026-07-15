@@ -48,7 +48,7 @@ object WorkoutEngine {
     val state: StateFlow<WorkoutState> = _state
 
     var tts: SpeechEngine? = null
-    var restCoaching: Boolean = true
+    var restCoaching: Boolean = true   // retained for compat; in-round tips now baked at generation
     var warnSound: Boolean = true
     var endBell: Boolean = true
     private var routine: Routine? = null
@@ -111,6 +111,9 @@ object WorkoutEngine {
         tts?.cut()
     }
 
+    // Intros are spoken slower than commands for clarity (multiplier on base rate).
+    private const val INTRO_RATE = 0.85f
+
     // ---- time callout phrasing pools (picked randomly for variety) ----
     private val halfwayLines = listOf(
         "Halfway there.", "Halfway. Keep the output up.", "That's half. Stay sharp."
@@ -141,23 +144,24 @@ object WorkoutEngine {
             if (endBell) SoundFx.ringBell()
 
             val announce: String
+            var announceRate = 1f
             if (round.isRest) {
                 announce = if (round.label == "Break") {
                     "Break. Swap your gear. ${niceDuration(round.durationSec)}."
                 } else {
-                    val tip = if (restCoaching) " " + ComboLibrary.restTips.random(rng) else ""
-                    "Rest. ${round.durationSec} seconds.$tip"
+                    "Rest. ${round.durationSec} seconds."
                 }
             } else {
                 val preDelivered = slotIdx in introDelivered
                 val intro = round.cues.firstOrNull { it.isIntro }
-                announce = if (intro != null && !preDelivered) {
-                    "${round.label}. ${niceDuration(round.durationSec)}. ${intro.text}"
+                if (intro != null && !preDelivered) {
+                    announce = "${round.label}. ${niceDuration(round.durationSec)}. ${intro.text}"
+                    announceRate = INTRO_RATE   // slow, for clarity
                 } else {
-                    "${round.label}. ${niceDuration(round.durationSec)}."
+                    announce = "${round.label}. ${niceDuration(round.durationSec)}."
                 }
             }
-            tts?.speak(announce)
+            tts?.speak(announce, announceRate)
 
             _state.value = WorkoutState(
                 phase = WorkoutPhase.RUNNING,
@@ -172,14 +176,27 @@ object WorkoutEngine {
                 elapsedTotal = elapsed,
             )
 
-            // During rest: schedule the NEXT work round's intro partway through.
+            // During rest: schedule the NEXT work round's intro EARLY, so even a long
+            // two-combo intro has the whole rest to finish speaking before the bell.
             var restIntroAt = -1
             var nextSlotIdx = -1
             if (round.isRest) {
                 val next = slots.getOrNull(slotIdx + 1)
                 if (next != null && !next.round.isRest && next.round.cues.any { it.isIntro }) {
                     nextSlotIdx = slotIdx + 1
-                    restIntroAt = (round.durationSec / 3).coerceAtLeast(5)
+                    restIntroAt = 3.coerceAtMost(round.durationSec / 2)
+                }
+            }
+
+            // Before a work round's clock starts, let any intro finish speaking so
+            // the first "Go" never lands on top of an unfinished instruction. The
+            // round's duration is preserved — this wait sits before t=0, not inside it.
+            if (!round.isRest) {
+                var guard = 0
+                while (tts?.isSpeaking() == true && guard < 12000) {
+                    if (skipFlag) break
+                    while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+                    delay(100); guard += 100
                 }
             }
 
@@ -198,12 +215,12 @@ object WorkoutEngine {
                     _state.value = _state.value.copy(currentCue = cue.text, currentCueIsCommand = cue.isCommand)
                 }
 
-                // Rest-time intro of the next round
+                // Rest-time intro of the next round (delivered slowly for clarity)
                 if (round.isRest && t == restIntroAt && nextSlotIdx >= 0) {
                     val next = slots[nextSlotIdx]
                     val intro = next.round.cues.first { it.isIntro }
                     val text = "Next: ${next.round.label}. ${intro.text}"
-                    tts?.speak(text)
+                    tts?.speak(text, INTRO_RATE)
                     _state.value = _state.value.copy(currentCue = text, currentCueIsCommand = false)
                     introDelivered += nextSlotIdx
                 }
