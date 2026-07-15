@@ -100,7 +100,9 @@ class ElevenLabsEngine(
             return null
         }
         return runCatching { synthesizeToFile(text, f) }.getOrElse {
-            lastStatus = "Network error (${it.javaClass.simpleName}) — used system voice"
+            val kind = it.javaClass.simpleName
+            val msg = it.message?.take(120).orEmpty()
+            lastStatus = "Network error: $kind ${msg} — used system voice"
             null
         }
     }
@@ -109,6 +111,13 @@ class ElevenLabsEngine(
         if (voiceId.length >= 4) "****" + voiceId.takeLast(4) else voiceId
 
     private fun synthesizeToFile(text: String, dest: File): File? {
+        // Validate voice ID first — a stray character (e.g. O vs 0) would otherwise
+        // throw IllegalArgumentException when building the URL, surfacing as a
+        // confusing "network error". ElevenLabs IDs are 20 alphanumeric chars.
+        if (!voiceId.matches(Regex("^[A-Za-z0-9]{20}$"))) {
+            lastStatus = "Voice ID looks invalid (need 20 letters/digits, got ${voiceId.length}) — used system voice"
+            return null
+        }
         val url = URL("https://api.elevenlabs.io/v1/text-to-speech/$voiceId")
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
