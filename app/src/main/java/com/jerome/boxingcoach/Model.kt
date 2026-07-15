@@ -71,4 +71,5 @@ data class AppSettings(
     val tryEmbeddedVoice: Boolean = false, // opt-in: attempt the bundled neural voice (experimental — can crash on some devices)
     val elevenApiKey: String = "",         // ElevenLabs API key (empty = use system TTS)
     val elevenVoiceId: String = "",        // ElevenLabs voice id (empty = app default)
+    val elevenEnabled: Boolean = true,     // master switch: use ElevenLabs when a key is present
 )

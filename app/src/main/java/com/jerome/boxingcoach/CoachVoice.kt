@@ -36,9 +36,10 @@ object CoachVoice {
         WorkoutEngine.tts = active
     }
 
-    /** Apply ElevenLabs settings (key/voice) and re-point the active engine. */
-    fun configureEleven(apiKey: String, voiceId: String) {
+    /** Apply ElevenLabs settings (key/voice/enabled) and re-point the active engine. */
+    fun configureEleven(apiKey: String, voiceId: String, enabled: Boolean = true) {
         elevenLabs?.apiKey = apiKey
+        elevenLabs?.enabled = enabled
         if (voiceId.isNotBlank()) elevenLabs?.voiceId = voiceId
         WorkoutEngine.tts = active
     }

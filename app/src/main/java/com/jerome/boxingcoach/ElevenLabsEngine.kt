@@ -45,6 +45,16 @@ class ElevenLabsEngine(
 
     var apiKey: String = ""
     var voiceId: String = DEFAULT_VOICE_ID // ElevenLabs voice; user can override in Settings
+    /** Master switch: when false, this engine reports not-configured so CoachVoice
+     *  uses system TTS even if a key is saved. Lets the user keep the key stored
+     *  but toggle the expensive cloud voice on/off. */
+    var enabled: Boolean = true
+
+    /** Human-readable result of the most recent speak/generate, for the Test
+     *  panel. e.g. "Played ElevenLabs (voice ****TYuZ)", "API 401: invalid api key",
+     *  "Offline — used system voice". */
+    @Volatile var lastStatus: String = ""
+        private set
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -65,7 +75,7 @@ class ElevenLabsEngine(
         File(context.getExternalFilesDir(null), "voice-cache").apply { mkdirs() }
     }
 
-    fun isConfigured(): Boolean = apiKey.isNotBlank()
+    fun isConfigured(): Boolean = enabled && apiKey.isNotBlank()
 
     private fun keyFor(text: String): String {
         // Include voiceId so switching voices doesn't collide with old cache.
@@ -77,13 +87,26 @@ class ElevenLabsEngine(
     private fun cachedFile(text: String): File = File(cacheDir, keyFor(text))
 
     /** Returns a ready audio file for [text], generating+caching it if needed.
-     *  Returns null if unavailable (no key / network / API error). */
+     *  Returns null if unavailable (no key / network / API error). Sets lastStatus. */
     private fun ensureAudio(text: String): File? {
         val f = cachedFile(text)
-        if (f.exists() && f.length() > 0) return f
-        if (!isConfigured()) return null
-        return runCatching { synthesizeToFile(text, f) }.getOrNull()
+        if (f.exists() && f.length() > 0) {
+            lastStatus = "Cached (voice ${voiceIdTail()}) — free replay"
+            return f
+        }
+        if (!isConfigured()) {
+            lastStatus = if (!enabled) "ElevenLabs off — using system voice"
+                         else "No API key — using system voice"
+            return null
+        }
+        return runCatching { synthesizeToFile(text, f) }.getOrElse {
+            lastStatus = "Network error (${it.javaClass.simpleName}) — used system voice"
+            null
+        }
     }
+
+    private fun voiceIdTail(): String =
+        if (voiceId.length >= 4) "****" + voiceId.takeLast(4) else voiceId
 
     private fun synthesizeToFile(text: String, dest: File): File? {
         val url = URL("https://api.elevenlabs.io/v1/text-to-speech/$voiceId")
@@ -105,8 +128,15 @@ class ElevenLabsEngine(
         """.trimIndent()
         conn.outputStream.use { it.write(body.toByteArray()) }
 
-        if (conn.responseCode !in 200..299) {
-            runCatching { conn.errorStream?.close() }
+        val code = conn.responseCode
+        if (code !in 200..299) {
+            // Read the error body — ElevenLabs returns a JSON message explaining why
+            // (invalid voice id, bad key, quota exceeded, etc.). This is the info
+            // that was previously thrown away, leaving a silent fallback.
+            val err = runCatching {
+                conn.errorStream?.bufferedReader()?.use { it.readText() }
+            }.getOrNull().orEmpty().take(180)
+            lastStatus = "API $code: ${err.ifBlank { "request rejected" }} — used system voice"
             conn.disconnect()
             return null
         }
@@ -115,8 +145,9 @@ class ElevenLabsEngine(
             java.io.FileOutputStream(tmp).use { out -> input.copyTo(out) }
         }
         conn.disconnect()
-        if (tmp.length() <= 0) { tmp.delete(); return null }
+        if (tmp.length() <= 0) { tmp.delete(); lastStatus = "Empty audio — used system voice"; return null }
         tmp.renameTo(dest)
+        lastStatus = "Generated ElevenLabs (voice ${voiceIdTail()})"
         return dest
     }
 
@@ -171,6 +202,10 @@ class ElevenLabsEngine(
 
     /** For the test panel: is this exact phrase already cached (free to play)? */
     fun isCached(text: String): Boolean = cachedFile(text).let { it.exists() && it.length() > 0 }
+
+    /** Delete this phrase's cached clip so the next speak() regenerates it — used
+     *  by the test panel's Force-regenerate so a new voice/settings change is heard. */
+    fun clearCached(text: String) { runCatching { cachedFile(text).delete() } }
 
     companion object {
         // "Michael"-style energetic male preset. User can paste any voice ID in Settings.

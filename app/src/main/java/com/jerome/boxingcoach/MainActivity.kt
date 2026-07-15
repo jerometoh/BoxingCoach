@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
         SoundFx.init(applicationContext)
         CoachVoice.init(applicationContext)
         val startupSettings = settingsStore.load()
-        CoachVoice.configureEleven(startupSettings.elevenApiKey, startupSettings.elevenVoiceId)
+        CoachVoice.configureEleven(startupSettings.elevenApiKey, startupSettings.elevenVoiceId, startupSettings.elevenEnabled)
         WorkoutEngine.tts = CoachVoice.active
 
         // First-launch permissions
@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
             WorkoutEngine.warnSound = settings.warnSound
             WorkoutEngine.endBell = settings.endBell
             CoachVoice.systemEngine?.setVoice(settings.voiceName)
-            CoachVoice.configureEleven(settings.elevenApiKey, settings.elevenVoiceId)
+            CoachVoice.configureEleven(settings.elevenApiKey, settings.elevenVoiceId, settings.elevenEnabled)
             WorkoutEngine.tts = CoachVoice.active
         }
         // Keep the screen awake only while a workout is actually on screen and running
@@ -401,8 +401,9 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         SectionHeader("Coach voice — ElevenLabs (expressive)")
-        Text("Paste an ElevenLabs API key to use the expressive cloud coach voice. Leave blank to use the system/neural TTS engine below. Audio for each phrase is generated once and cached, so repeat use stays within the free tier. Falls back to system voice when offline.",
+        Text("Paste an ElevenLabs API key to use the expressive cloud coach voice. Leave blank (or turn off below) to use the system/neural TTS engine. Audio for each phrase is generated once and cached, so repeat use stays within the free tier. Falls back to system voice when offline.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ToggleRow("Use ElevenLabs voice", s.elevenEnabled) { onChange(s.copy(elevenEnabled = it)) }
         OutlinedTextField(
             value = s.elevenApiKey,
             onValueChange = { onChange(s.copy(elevenApiKey = it.trim())) },
@@ -419,6 +420,7 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         )
         Text(
             if (CoachVoice.usingEleven) "Active: ElevenLabs expressive voice."
+            else if (s.elevenApiKey.isNotBlank() && !s.elevenEnabled) "Active: system / neural TTS (ElevenLabs turned off)."
             else "Active: system / neural TTS (no ElevenLabs key set).",
             fontSize = 12.sp, fontWeight = FontWeight.Medium,
             color = if (CoachVoice.usingEleven) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -427,6 +429,7 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         // ---- Voice test panel (fast iteration on cue phrasing / voice) ----
         SectionHeader("Test voice")
         var testText by remember { mutableStateOf("Round two! Jab, cross, left hook — GO! Empty the tank!") }
+        var lastStatus by remember { mutableStateOf("") }
         OutlinedTextField(
             value = testText,
             onValueChange = { testText = it },
@@ -436,18 +439,41 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
                 CoachVoice.active?.let { it.cut(); it.speak(testText) }
+                // Give the engine a beat to attempt generation, then read status.
+                lastStatus = "Speaking…"
             }, modifier = Modifier.weight(1f)) { Text("Speak") }
             OutlinedButton(onClick = { CoachVoice.active?.cut() }, modifier = Modifier.weight(1f)) {
                 Text("Stop")
             }
         }
-        val cachedNote = CoachVoice.elevenLabs?.let {
+        // Force-regenerate: clears this phrase's cached clip so a new voice ID or
+        // voice-setting change is actually heard (otherwise the old cached audio
+        // just replays). Only meaningful when ElevenLabs is active.
+        TextButton(onClick = {
+            CoachVoice.elevenLabs?.let {
+                it.clearCached(testText)
+                it.cut(); it.speak(testText)
+                lastStatus = "Regenerating…"
+            }
+        }) { Text("Force regenerate this phrase") }
+
+        // Live status readout — polls the engine's lastStatus so you can see which
+        // voice actually played, or the exact API error if it fell back.
+        LaunchedEffect(lastStatus) {
+            if (lastStatus.endsWith("…")) {
+                kotlinx.coroutines.delay(1200)
+                lastStatus = CoachVoice.elevenLabs?.lastStatus?.ifBlank { "Done" } ?: "System voice"
+            }
+        }
+        val cacheState = CoachVoice.elevenLabs?.let {
             if (!it.isConfigured()) "System voice — no caching."
             else if (it.isCached(testText)) "This exact phrase is cached (free replay)."
-            else "Not cached yet — first Speak will generate it (uses characters)."
+            else "Not cached yet — first Speak generates it (uses characters)."
         } ?: ""
-        if (cachedNote.isNotBlank()) Text(cachedNote, fontSize = 12.sp,
+        if (cacheState.isNotBlank()) Text(cacheState, fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (lastStatus.isNotBlank()) Text("Status: $lastStatus", fontSize = 12.sp,
+            fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
 
         SectionHeader("Voice engine (fallback / no-key)")
         var voiceRefresh by remember { mutableStateOf(0) }
