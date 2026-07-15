@@ -32,6 +32,7 @@ class SettingsStore(context: Context) {
         voiceMode = VoiceMode.valueOf(prefs.getString("voiceMode", VoiceMode.DUCK_MUSIC.name)!!),
         stance = Stance.valueOf(prefs.getString("stance", Stance.ORTHODOX.name)!!),
         restCoaching = prefs.getBoolean("restCoaching", true),
+        countReps = prefs.getBoolean("countReps", true),
         voiceCommands = prefs.getBoolean("voiceCommands", false),
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
         warnSound = prefs.getBoolean("warnSound", true),
@@ -48,6 +49,7 @@ class SettingsStore(context: Context) {
             .putString("voiceMode", s.voiceMode.name)
             .putString("stance", s.stance.name)
             .putBoolean("restCoaching", s.restCoaching)
+            .putBoolean("countReps", s.countReps)
             .putBoolean("voiceCommands", s.voiceCommands)
             .putBoolean("keepScreenOn", s.keepScreenOn)
             .putBoolean("warnSound", s.warnSound)

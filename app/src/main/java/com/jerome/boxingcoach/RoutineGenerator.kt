@@ -23,11 +23,16 @@ object RoutineGenerator {
     private val attackWords = listOf("Go", "Hit", "Shoot")
     private val downWords = listOf("Down", "Drop")
 
-    fun generate(params: RoutineParams, stance: Stance, seed: Long = System.nanoTime()): Routine {
+    fun generate(
+        params: RoutineParams,
+        stance: Stance,
+        countReps: Boolean = true,
+        seed: Long = System.nanoTime()
+    ): Routine {
         val rng = Random(seed)
         val sections = mutableListOf<Section>()
 
-        if (params.includeWarmup) sections += warmup(rng, stance)
+        if (params.includeWarmup) sections += warmup(rng, stance, countReps)
         if (params.includeShadow) sections += workSection(
             SectionType.SHADOW, "Shadow boxing (no gloves)",
             params.shadowRounds, params.shadowRoundSec, params, stance, rng
@@ -51,12 +56,12 @@ object RoutineGenerator {
     )
 
     /** Regenerate one section of an existing routine, keeping the rest. */
-    fun regenerateSection(routine: Routine, sectionIndex: Int, stance: Stance): Routine {
+    fun regenerateSection(routine: Routine, sectionIndex: Int, stance: Stance, countReps: Boolean = true): Routine {
         val p = routine.params
         val rng = Random(System.nanoTime())
         val old = routine.sections[sectionIndex]
         var fresh = when (old.type) {
-            SectionType.WARMUP -> warmup(rng, stance)
+            SectionType.WARMUP -> warmup(rng, stance, countReps)
             SectionType.SHADOW -> workSection(SectionType.SHADOW, old.title, p.shadowRounds, p.shadowRoundSec, p, stance, rng)
             SectionType.BAG -> workSection(SectionType.BAG, old.title, p.bagRounds, p.bagRoundSec, p, stance, rng)
             SectionType.CORE -> core(p.coreSec, rng, stance)
@@ -71,12 +76,12 @@ object RoutineGenerator {
     }
 
     /** Regenerate a single work round within a section. */
-    fun regenerateRound(routine: Routine, sectionIndex: Int, roundIndex: Int, stance: Stance): Routine {
+    fun regenerateRound(routine: Routine, sectionIndex: Int, roundIndex: Int, stance: Stance, countReps: Boolean = true): Routine {
         val section = routine.sections[sectionIndex]
         val p = routine.params
         val rng = Random(System.nanoTime())
         if (section.type != SectionType.SHADOW && section.type != SectionType.BAG)
-            return regenerateSection(routine, sectionIndex, stance)
+            return regenerateSection(routine, sectionIndex, stance, countReps)
 
         val workRounds = section.rounds.filter { !it.isRest }
         val target = section.rounds[roundIndex]
@@ -90,11 +95,114 @@ object RoutineGenerator {
 
     // ------------------------------------------------------------------
 
-    private fun warmup(rng: Random, stance: Stance): Section {
-        val moves = ComboLibrary.warmupMoves.shuffled(rng).take(8)
-        val per = 300 / moves.size
-        val cues = moves.mapIndexed { i, m -> Cue(i * per, ComboLibrary.render(m, stance)) }
-        val round = Round("Warm-up", 300, cues, "Dynamic warm-up — ${moves.size} movements, 5 min")
+    // Warm-up pacing constants (seconds).
+    private const val WARMUP_TARGET_SEC = 250   // ~80% of the natural ~312s; starting point, tune here
+    private const val WARMUP_ANNOUNCE = 3        // time to say the exercise name before counting
+    private const val WARMUP_BREATH = 2          // gap after an exercise before the next
+    private const val WARMUP_SWITCH = 1          // "Switch" beat between sides
+
+    /** Real length a move occupies, given whether we're counting reps aloud. */
+    private fun warmupBlockSec(mv: ComboLibrary.WarmupMove, countReps: Boolean): Int = when (mv.kind) {
+        ComboLibrary.MoveKind.HOLD ->
+            WARMUP_ANNOUNCE + mv.holdSec + WARMUP_BREATH
+        ComboLibrary.MoveKind.PER_SIDE ->
+            if (countReps) WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_SWITCH + mv.reps * mv.secPerCount + WARMUP_BREATH
+            else WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_SWITCH + WARMUP_BREATH
+        ComboLibrary.MoveKind.REP ->
+            if (countReps) WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_BREATH
+            else WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_BREATH
+    }
+
+    /**
+     * Rep-driven warm-up. Each exercise is announced, then counted aloud at its own
+     * contextual cadence (secPerCount) so there's a spoken beat throughout instead of
+     * long silences. Per-side moves count one side, say "Switch", then the other.
+     * Holds are announced and counted DOWN to finish. Counts land on whole seconds
+     * because the engine fires one cue per second.
+     *
+     * We take as many shuffled moves as fit WARMUP_TARGET_SEC and stop — so the set
+     * varies session to session and the total stays near target.
+     */
+    private fun warmup(rng: Random, stance: Stance, countReps: Boolean): Section {
+        val shuffled = ComboLibrary.warmupMoves.shuffled(rng)
+
+        // Greedily take moves until the next one would overrun the target.
+        val picked = mutableListOf<ComboLibrary.WarmupMove>()
+        var budget = 0
+        for (mv in shuffled) {
+            val blk = warmupBlockSec(mv, countReps)
+            if (picked.isNotEmpty() && budget + blk > WARMUP_TARGET_SEC) continue
+            picked += mv; budget += blk
+        }
+
+        val cues = mutableListOf<Cue>()
+        val introReserve = 5
+        cues += Cue(0, listOf(
+            "Let's warm up — ${picked.size} exercises, top to bottom. Easy pace, follow my count.",
+            "Warm-up time. ${picked.size} exercises head to toe — move with the count.",
+            "Warming up: ${picked.size} exercises from the top down. Loosen everything off."
+        ).random(rng))
+
+        var t = introReserve
+        picked.forEachIndexed { i, mv ->
+            val name = ComboLibrary.render(mv.text, stance)
+            val lead = when {
+                i == 0 -> "First up"
+                i == picked.size - 1 -> "Last one"
+                else -> listOf("Next", "Now", "Moving on").random(rng)
+            }
+
+            when (mv.kind) {
+                ComboLibrary.MoveKind.REP -> {
+                    cues += Cue(t, "$lead: $name." + if (countReps) " Ready…" else "")
+                    t += WARMUP_ANNOUNCE
+                    if (countReps) {
+                        for (r in 1..mv.reps) {
+                            cues += Cue(t, if (r == mv.reps) "and ${mv.reps}." else "$r…")
+                            t += mv.secPerCount
+                        }
+                    } else {
+                        t += mv.reps * mv.secPerCount
+                    }
+                    t += WARMUP_BREATH
+                }
+
+                ComboLibrary.MoveKind.PER_SIDE -> {
+                    cues += Cue(t, "$lead: $name. ${mv.reps} each side." +
+                        if (countReps) " Ready…" else " Switch halfway.")
+                    t += WARMUP_ANNOUNCE
+                    if (countReps) {
+                        for (r in 1..mv.reps) { cues += Cue(t, "$r…"); t += mv.secPerCount }
+                        cues += Cue(t, "Switch."); t += WARMUP_SWITCH
+                        for (r in 1..mv.reps) {
+                            cues += Cue(t, if (r == mv.reps) "and ${mv.reps}." else "$r…")
+                            t += mv.secPerCount
+                        }
+                    } else {
+                        val half = mv.reps * mv.secPerCount
+                        t += half
+                        cues += Cue(t, "Switch sides."); t += WARMUP_SWITCH + half
+                    }
+                    t += WARMUP_BREATH
+                }
+
+                ComboLibrary.MoveKind.HOLD -> {
+                    cues += Cue(t, "$lead: $name.")
+                    t += WARMUP_ANNOUNCE
+                    val cd = if (mv.holdSec >= 8) 5 else 3   // 5-4-3-2-1 or 3-2-1
+                    val holdBeforeCd = (mv.holdSec - cd).coerceAtLeast(0)
+                    t += holdBeforeCd
+                    for (n in cd downTo 1) { cues += Cue(t, "$n…"); t += 1 }
+                    t += WARMUP_BREATH
+                }
+            }
+        }
+        val total = t + 2
+        cues += Cue(total - 2, "Warm-up done. Shake it out — let's get to work.")
+
+        val label = "Warm-up — ${picked.size} exercises"
+        val round = Round("Warm-up", total, cues,
+            "Dynamic warm-up — ${picked.size} exercises, ${total / 60} min ${total % 60}s")
         return Section(SectionType.WARMUP, "Warm-up", listOf(round))
     }
 

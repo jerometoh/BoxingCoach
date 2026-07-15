@@ -126,14 +126,14 @@ class MainActivity : ComponentActivity() {
                     Screen.SETUP -> SetupScreen(params,
                         onParams = { params = it; settingsStore.saveParams(it) },
                         onGenerate = {
-                            routine = RoutineGenerator.generate(params, settings.stance)
+                            routine = RoutineGenerator.generate(params, settings.stance, settings.countReps)
                             screen = Screen.REVIEW
                         })
                     Screen.REVIEW -> routine?.let { r ->
                         ReviewScreen(r,
-                            onRegenAll = { routine = RoutineGenerator.generate(params, settings.stance) },
-                            onRegenSection = { si -> routine = RoutineGenerator.regenerateSection(r, si, settings.stance) },
-                            onRegenRound = { si, ri -> routine = RoutineGenerator.regenerateRound(r, si, ri, settings.stance) },
+                            onRegenAll = { routine = RoutineGenerator.generate(params, settings.stance, settings.countReps) },
+                            onRegenSection = { si -> routine = RoutineGenerator.regenerateSection(r, si, settings.stance, settings.countReps) },
+                            onRegenRound = { si, ri -> routine = RoutineGenerator.regenerateRound(r, si, ri, settings.stance, settings.countReps) },
                             onBack = { screen = Screen.SETUP },
                             onStart = {
                                 WorkoutService.start(this@MainActivity)
@@ -525,6 +525,7 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         }
 
         ToggleRow("Coaching tips during rest", s.restCoaching) { onChange(s.copy(restCoaching = it)) }
+        ToggleRow("Count warm-up reps aloud", s.countReps) { onChange(s.copy(countReps = it)) }
         ToggleRow("Voice commands (experimental)", s.voiceCommands) { onChange(s.copy(voiceCommands = it)) }
         Text("Voice commands: say pause / go / skip / repeat. Accuracy drops with loud music — on-screen buttons always work.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -63,6 +63,7 @@ data class AppSettings(
     val voiceMode: VoiceMode = VoiceMode.DUCK_MUSIC,
     val stance: Stance = Stance.ORTHODOX,
     val restCoaching: Boolean = true,     // spoken tips during rest vs tone only
+    val countReps: Boolean = true,        // count warm-up reps aloud ("1, 2, 3…") vs announce only
     val voiceCommands: Boolean = false,   // experimental hands-free control
     val keepScreenOn: Boolean = true,     // prevent screen dimming/locking during workout
     val warnSound: Boolean = true,        // clapper sound at 10 seconds remaining

@@ -120,17 +120,37 @@ object ComboLibrary {
     )
 
     // ---- Warm-up ----
+    enum class MoveKind { REP, PER_SIDE, HOLD }
+
+    /**
+     * A warm-up movement.
+     *  - REP:      counted straight through, [reps] counts.
+     *  - PER_SIDE: [reps] counts on one side, "Switch", then [reps] on the other.
+     *  - HOLD:     no reps; held for [holdSec], then a spoken countdown to finish.
+     *  secPerCount is CONTEXTUAL — the real seconds between counts. A wrist roll is
+     *  fast (1s), a lunge with a twist is slow and deliberate (3s). Must be a whole
+     *  number ≥ 1: the workout engine ticks once per second and places one cue per
+     *  second, so counts have to land on distinct whole seconds.
+     */
+    data class WarmupMove(
+        val text: String,
+        val kind: MoveKind,
+        val secPerCount: Int = 2,
+        val reps: Int = 10,
+        val holdSec: Int = 20,
+    )
+
     val warmupMoves = listOf(
-        "Neck circles, both directions",
-        "Arm circles, small to large",
-        "Shoulder rolls, forward and back",
-        "Torso twists, loose and easy",
-        "Hip circles, both directions",
-        "Leg swings, front to back, each side",
-        "Light bounce on the toes — find your rhythm",
-        "Wrist rolls and open-close fists",
-        "Lunge with a twist, alternating sides",
-        "High knees, twenty seconds, easy pace",
+        WarmupMove("Neck circles, both directions", MoveKind.REP, secPerCount = 2),
+        WarmupMove("Arm circles, small to large", MoveKind.REP, secPerCount = 2),
+        WarmupMove("Shoulder rolls, forward and back", MoveKind.REP, secPerCount = 2),
+        WarmupMove("Torso twists, loose and easy", MoveKind.REP, secPerCount = 2),
+        WarmupMove("Hip circles, both directions", MoveKind.REP, secPerCount = 2),
+        WarmupMove("Wrist rolls and open-close fists", MoveKind.REP, secPerCount = 1),
+        WarmupMove("Leg swings, front to back", MoveKind.PER_SIDE, secPerCount = 2),
+        WarmupMove("Lunge with a twist", MoveKind.PER_SIDE, secPerCount = 3),
+        WarmupMove("High knees, easy pace", MoveKind.PER_SIDE, secPerCount = 1),
+        WarmupMove("Light bounce on the toes — find your rhythm", MoveKind.HOLD, holdSec = 20),
     )
 
     // ---- Core exercises ----
