@@ -96,175 +96,125 @@ object RoutineGenerator {
 
     // ------------------------------------------------------------------
 
-    // Warm-up pacing constants (seconds).
-    private const val WARMUP_TARGET_SEC = 250   // ~80% of the natural ~312s; starting point, tune here
-    private const val WARMUP_ANNOUNCE = 3        // time to say the exercise name before counting
-    private const val WARMUP_BREATH = 2          // gap after an exercise before the next
-    private const val WARMUP_SWITCH = 1          // "Switch" beat between sides
-
-    /** Real length a move occupies, given whether we're counting reps aloud. */
-    private fun warmupBlockSec(mv: ComboLibrary.WarmupMove, countReps: Boolean): Int = when (mv.kind) {
-        ComboLibrary.MoveKind.HOLD ->
-            WARMUP_ANNOUNCE + mv.holdSec + WARMUP_BREATH
-        ComboLibrary.MoveKind.PER_SIDE ->
-            if (countReps) WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_SWITCH + mv.reps * mv.secPerCount + WARMUP_BREATH
-            else WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_SWITCH + WARMUP_BREATH
-        ComboLibrary.MoveKind.REP ->
-            if (countReps) WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_BREATH
-            else WARMUP_ANNOUNCE + mv.reps * mv.secPerCount + WARMUP_BREATH
-    }
+    // How many warm-up exercises to include (chosen from the shuffled library).
+    private const val WARMUP_EXERCISE_COUNT = 8
 
     /**
-     * Rep-driven warm-up. Each exercise is announced, then counted aloud at its own
-     * contextual cadence (secPerCount) so there's a spoken beat throughout instead of
-     * long silences. Per-side moves count one side, say "Switch", then the other.
-     * Holds are announced and counted DOWN to finish. Counts land on whole seconds
-     * because the engine fires one cue per second.
-     *
-     * We take as many shuffled moves as fit WARMUP_TARGET_SEC and stop — so the set
-     * varies session to session and the total stays near target.
+     * Guided warm-up. Emits a list of GuidedSteps; the engine speaks each exercise
+     * name, waits for the voice to finish, THEN counts at the exercise's own cadence
+     * (so "1, 2" never stack behind the announcement). Length is emergent — the round
+     * carries no meaningful fixed duration.
      */
     private fun warmup(rng: Random, stance: Stance, countReps: Boolean): Section {
-        val shuffled = ComboLibrary.warmupMoves.shuffled(rng)
+        val picked = ComboLibrary.warmupMoves.shuffled(rng).take(WARMUP_EXERCISE_COUNT)
 
-        // Greedily take moves until the next one would overrun the target.
-        val picked = mutableListOf<ComboLibrary.WarmupMove>()
-        var budget = 0
-        for (mv in shuffled) {
-            val blk = warmupBlockSec(mv, countReps)
-            if (picked.isNotEmpty() && budget + blk > WARMUP_TARGET_SEC) continue
-            picked += mv; budget += blk
-        }
-
-        val cues = mutableListOf<Cue>()
-        val introReserve = 5
-        cues += Cue(0, listOf(
-            "Let's warm up — ${picked.size} exercises, top to bottom. Easy pace, follow my count.",
-            "Warm-up time. ${picked.size} exercises head to toe — move with the count.",
+        val steps = mutableListOf<GuidedStep>()
+        val names = mutableListOf<String>()
+        steps += GuidedStep(listOf(
+            "Let's warm up — ${picked.size} exercises, top to bottom. Follow my count.",
+            "Warm-up time. ${picked.size} exercises head to toe. Move with the count.",
             "Warming up: ${picked.size} exercises from the top down. Loosen everything off."
         ).random(rng))
 
-        var t = introReserve
         picked.forEachIndexed { i, mv ->
             val name = ComboLibrary.render(mv.text, stance)
+            names += name
             val lead = when {
                 i == 0 -> "First up"
                 i == picked.size - 1 -> "Last one"
                 else -> listOf("Next", "Now", "Moving on").random(rng)
             }
-
-            when (mv.kind) {
-                ComboLibrary.MoveKind.REP -> {
-                    cues += Cue(t, "$lead: $name." + if (countReps) " Ready…" else "")
-                    t += WARMUP_ANNOUNCE
-                    if (countReps) {
-                        for (r in 1..mv.reps) {
-                            cues += Cue(t, if (r == mv.reps) "and ${mv.reps}." else "$r…")
-                            t += mv.secPerCount
-                        }
-                    } else {
-                        t += mv.reps * mv.secPerCount
-                    }
-                    t += WARMUP_BREATH
-                }
-
-                ComboLibrary.MoveKind.PER_SIDE -> {
-                    cues += Cue(t, "$lead: $name. ${mv.reps} each side." +
-                        if (countReps) " Ready…" else " Switch halfway.")
-                    t += WARMUP_ANNOUNCE
-                    if (countReps) {
-                        for (r in 1..mv.reps) { cues += Cue(t, "$r…"); t += mv.secPerCount }
-                        cues += Cue(t, "Switch."); t += WARMUP_SWITCH
-                        for (r in 1..mv.reps) {
-                            cues += Cue(t, if (r == mv.reps) "and ${mv.reps}." else "$r…")
-                            t += mv.secPerCount
-                        }
-                    } else {
-                        val half = mv.reps * mv.secPerCount
-                        t += half
-                        cues += Cue(t, "Switch sides."); t += WARMUP_SWITCH + half
-                    }
-                    t += WARMUP_BREATH
-                }
-
-                ComboLibrary.MoveKind.HOLD -> {
-                    cues += Cue(t, "$lead: $name.")
-                    t += WARMUP_ANNOUNCE
-                    val cd = if (mv.holdSec >= 8) 5 else 3   // 5-4-3-2-1 or 3-2-1
-                    val holdBeforeCd = (mv.holdSec - cd).coerceAtLeast(0)
-                    t += holdBeforeCd
-                    for (n in cd downTo 1) { cues += Cue(t, "$n…"); t += 1 }
-                    t += WARMUP_BREATH
-                }
+            steps += when (mv.kind) {
+                ComboLibrary.MoveKind.REP -> GuidedStep(
+                    announce = "$lead: $name.",
+                    reps = if (countReps) mv.reps else 0,
+                    secPerCount = mv.secPerCount,
+                )
+                ComboLibrary.MoveKind.PER_SIDE -> GuidedStep(
+                    announce = "$lead: $name. ${mv.reps} each side.",
+                    reps = if (countReps) mv.reps else 0,
+                    secPerCount = mv.secPerCount,
+                    perSide = true,
+                    holdSec = if (countReps) 0 else mv.reps * mv.secPerCount, // silent timed hold per side when not counting
+                )
+                ComboLibrary.MoveKind.HOLD -> GuidedStep(
+                    announce = "$lead: $name.",
+                    holdSec = mv.holdSec,
+                )
             }
         }
-        val total = t + 2
-        cues += Cue(total - 2, "Warm-up done. Shake it out — let's get to work.")
+        steps += GuidedStep("Warm-up done. Shake it out — let's get to work.")
 
-        val label = "Warm-up — ${picked.size} exercises"
-        val round = Round("Warm-up", total, cues,
-            "Dynamic warm-up — ${picked.size} exercises, ${total / 60} min ${total % 60}s")
+        val round = Round(
+            label = "Warm-up",
+            durationSec = 0,
+            cues = emptyList(),
+            summary = "Dynamic warm-up — ${picked.size} exercises",
+            guidedSteps = steps,
+            exerciseNames = names,
+        )
         return Section(SectionType.WARMUP, "Warm-up", listOf(round))
     }
 
     private fun core(totalSec: Int, rng: Random, stance: Stance): Section {
         val count = (totalSec / 50).coerceIn(4, 8)
         val moves = ComboLibrary.coreMoves.shuffled(rng).take(count)
-        val per = totalSec / count
-        val cues = moves.mapIndexed { i, m -> Cue(i * per, ComboLibrary.render(m, stance) + ", ${per} seconds") }
-        val round = Round("Core", totalSec, cues, "Core circuit — $count exercises, ${totalSec / 60} min")
+        val holdEach = (totalSec / count).coerceIn(20, 60)
+
+        val steps = mutableListOf<GuidedStep>()
+        val names = mutableListOf<String>()
+        steps += GuidedStep("Core circuit — ${moves.size} exercises. Brace and breathe.")
+        moves.forEachIndexed { i, m ->
+            val name = ComboLibrary.render(m, stance)
+            names += name
+            val lead = if (i == moves.size - 1) "Last one" else if (i == 0) "First" else "Next"
+            steps += GuidedStep(announce = "$lead: $name.", holdSec = holdEach)
+        }
+        steps += GuidedStep("Core done. Nice work.")
+
+        val round = Round(
+            label = "Core",
+            durationSec = 0,
+            cues = emptyList(),
+            summary = "Core circuit — ${moves.size} exercises",
+            guidedSteps = steps,
+            exerciseNames = names,
+        )
         return Section(SectionType.CORE, "Core", listOf(round))
     }
 
     private fun cooldown(rng: Random): Section {
         val moves = ComboLibrary.cooldownMoves.shuffled(rng).take(6)
-        val cues = mutableListOf<Cue>()
-        val introReserve = 5
-        cues += Cue(0, listOf(
+        val steps = mutableListOf<GuidedStep>()
+        val names = mutableListOf<String>()
+        steps += GuidedStep(listOf(
             "Let's cool down. ${moves.size} stretches — ease into each one and breathe.",
             "Cooling down: ${moves.size} stretches. Slow and gentle, don't force anything.",
             "Cool-down time — ${moves.size} stretches. Long, easy breaths throughout."
         ).random(rng))
 
-        var t = introReserve
         moves.forEachIndexed { i, mv ->
-            val name = ComboLibrary.render(mv.text, stance = Stance.ORTHODOX) // no L/R tokens in cooldown text
-            val lead = when {
-                i == 0 -> "First"
-                i == moves.size - 1 -> "Last one"
-                else -> listOf("Next", "Now").random(rng)
-            }
-            when (mv.kind) {
-                ComboLibrary.MoveKind.PER_SIDE -> {
-                    // Hold one side, switch, hold the other.
-                    cues += Cue(t, "$lead: $name. Hold one side."); t += WARMUP_ANNOUNCE
-                    t += holdWithCountdown(cues, t, mv.holdSec)
-                    cues += Cue(t, "Switch sides."); t += WARMUP_SWITCH
-                    t += holdWithCountdown(cues, t, mv.holdSec)
-                    t += WARMUP_BREATH
-                }
-                else -> { // HOLD (and any REP treated as a hold here)
-                    cues += Cue(t, "$lead: $name."); t += WARMUP_ANNOUNCE
-                    t += holdWithCountdown(cues, t, mv.holdSec)
-                    t += WARMUP_BREATH
-                }
+            val name = ComboLibrary.render(mv.text, Stance.ORTHODOX) // no L/R tokens in cool-down text
+            names += name
+            val lead = if (i == moves.size - 1) "Last one" else if (i == 0) "First" else "Next"
+            steps += if (mv.kind == ComboLibrary.MoveKind.PER_SIDE) {
+                GuidedStep(announce = "$lead: $name. Hold one side, then switch.",
+                    holdSec = mv.holdSec, perSide = true)
+            } else {
+                GuidedStep(announce = "$lead: $name.", holdSec = mv.holdSec)
             }
         }
-        val total = t + 3
-        cues += Cue(total - 3, "That's your cool-down. Good work today.")
-        val round = Round("Cool-down", total, cues,
-            "Static stretches and breathing — ${moves.size} stretches, ${total / 60} min")
-        return Section(SectionType.COOLDOWN, "Cool-down", listOf(round))
-    }
+        steps += GuidedStep("That's your cool-down. Good work today.")
 
-    /** Emit a gentle spoken countdown over the last few seconds of a hold. Returns
-     *  the seconds consumed (== holdSec). Cues are placed on distinct whole seconds. */
-    private fun holdWithCountdown(cues: MutableList<Cue>, startT: Int, holdSec: Int): Int {
-        val cd = if (holdSec >= 8) 5 else 3
-        val quietBefore = (holdSec - cd).coerceAtLeast(0)
-        var tt = startT + quietBefore
-        for (n in cd downTo 1) { cues += Cue(tt, "$n…"); tt++ }
-        return holdSec
+        val round = Round(
+            label = "Cool-down",
+            durationSec = 0,
+            cues = emptyList(),
+            summary = "Static stretches and breathing — ${moves.size} stretches",
+            guidedSteps = steps,
+            exerciseNames = names,
+        )
+        return Section(SectionType.COOLDOWN, "Cool-down", listOf(round))
     }
 
     private fun workSection(

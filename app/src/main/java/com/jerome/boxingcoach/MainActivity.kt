@@ -258,8 +258,18 @@ private fun ReviewScreen(
                                 Text(round.label, fontWeight = FontWeight.Medium)
                                 if (section.type == SectionType.SHADOW || section.type == SectionType.BAG) {
                                     TextButton(onClick = { onRegenRound(si, ri) }) { Text("Redo") }
+                                } else if (round.isGuided) {
+                                    TextButton(onClick = { onRegenSection(si) }) { Text("Redo") }
                                 }
                             }
+                            if (round.isGuided) {
+                                Text("${round.exerciseNames.size} exercises — ${round.summary}",
+                                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                round.exerciseNames.forEachIndexed { idx, name ->
+                                    Text("${idx + 1}. $name", fontSize = 13.sp,
+                                        modifier = Modifier.padding(start = 4.dp, top = 2.dp))
+                                }
+                            } else {
                             Text("${round.durationSec / 60} min ${round.durationSec % 60} sec — ${round.summary}",
                                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             round.cues.firstOrNull { it.isIntro }?.let {
@@ -270,6 +280,7 @@ private fun ReviewScreen(
                             if (commandSample.isNotEmpty()) {
                                 Text("Live: " + commandSample.joinToString("  ·  ") { it.text },
                                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             }
                         }
                     }
@@ -324,21 +335,29 @@ private fun WorkoutScreen(
             }
         }
 
-        Text(
-            "%d:%02d".format(s.secondsLeft / 60, s.secondsLeft % 60),
-            fontSize = 104.sp, fontWeight = FontWeight.Bold, color = Color.White,
-            lineHeight = 104.sp
-        )
+        if (s.guided) {
+            Text(
+                if (s.stepTotal > 0) "Exercise ${s.stepIndex.coerceAtLeast(1)} / ${s.stepTotal}" else "Get ready",
+                fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                lineHeight = 44.sp
+            )
+        } else {
+            Text(
+                "%d:%02d".format(s.secondsLeft / 60, s.secondsLeft % 60),
+                fontSize = 104.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                lineHeight = 104.sp
+            )
+        }
 
         // The action: commands render large and bold; the longer pre-round
         // explanation renders smaller since it's read once, not reacted to.
         Text(
             s.currentCue,
-            fontSize = if (s.currentCueIsCommand) 52.sp else 22.sp,
-            fontWeight = if (s.currentCueIsCommand) FontWeight.ExtraBold else FontWeight.Medium,
-            color = if (s.currentCueIsCommand) Color(0xFFFFD54F) else Color.White.copy(alpha = 0.85f),
+            fontSize = if (s.currentCueIsCommand) 52.sp else if (s.guided) 32.sp else 22.sp,
+            fontWeight = if (s.currentCueIsCommand) FontWeight.ExtraBold else if (s.guided) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (s.currentCueIsCommand) Color(0xFFFFD54F) else Color.White.copy(alpha = 0.9f),
             textAlign = TextAlign.Center,
-            lineHeight = if (s.currentCueIsCommand) 56.sp else 28.sp,
+            lineHeight = if (s.currentCueIsCommand) 56.sp else if (s.guided) 38.sp else 28.sp,
             modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
             maxLines = if (s.currentCueIsCommand) 2 else 5,
         )
@@ -566,7 +585,8 @@ private fun ToggleRow(label: String, value: Boolean, onChange: (Boolean) -> Unit
 private fun Stepper(label: String, value: Int, min: Int, max: Int, step: Int = 1, onChange: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 12.dp), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(end = 8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { if (value - step >= min) onChange(value - step) }) { Text("−") }
             Text("$value", Modifier.padding(horizontal = 12.dp), fontSize = 16.sp)

@@ -28,6 +28,19 @@ data class RoutineParams(
  *  isCommand = a short live trigger word ("Go", "Down", "Feint"...) rendered large. */
 data class Cue(val offsetSec: Int, val text: String, val isIntro: Boolean = false, val isCommand: Boolean = false)
 
+/** One step in a guided section (warm-up / core / cool-down). The engine speaks
+ *  [announce], WAITS for speech to finish, then either counts [reps] at [secPerCount]
+ *  cadence (doubled with a "Switch" if [perSide]) or holds for [holdSec] with a
+ *  spoken countdown. Because each step waits for its own speech, counts never stack
+ *  behind the announcement. Guided rounds have no fixed duration — length is emergent. */
+data class GuidedStep(
+    val announce: String,
+    val reps: Int = 0,
+    val secPerCount: Int = 2,
+    val perSide: Boolean = false,
+    val holdSec: Int = 0,
+)
+
 data class Round(
     val label: String,             // e.g. "Shadow boxing — Round 2 of 3"
     val durationSec: Int,
@@ -35,7 +48,11 @@ data class Round(
     val summary: String,           // short description shown in review screen
     val isRest: Boolean = false,
     val legend: String = "",       // trigger-word mapping shown on the workout screen, e.g. "Go → jab, cross · Down → two squats"
-)
+    val guidedSteps: List<GuidedStep>? = null,  // non-null => guided section (warm-up/core/cool-down)
+    val exerciseNames: List<String> = emptyList(), // names shown in the review screen for guided sections
+) {
+    val isGuided: Boolean get() = guidedSteps != null
+}
 
 data class Section(
     val type: SectionType,
@@ -48,7 +65,15 @@ data class Routine(
     val params: RoutineParams = RoutineParams(),
     val sections: List<Section> = emptyList(),
 ) {
-    val totalSec: Int get() = sections.sumOf { s -> s.rounds.sumOf { it.durationSec } }
+    val totalSec: Int get() = sections.sumOf { s -> s.rounds.sumOf { r ->
+        if (r.isGuided) r.guidedSteps!!.sumOf { st ->
+            8 + when { // ~8s to announce each step, plus its work
+                st.reps > 0 -> st.reps * st.secPerCount * (if (st.perSide) 2 else 1)
+                st.holdSec > 0 -> st.holdSec * (if (st.perSide) 2 else 1)
+                else -> 0
+            }
+        } else r.durationSec
+    } }
 }
 
 data class HistoryEntry(

@@ -24,6 +24,9 @@ data class WorkoutState(
     val legend: String = "",
     val isRest: Boolean = false,
     val elapsedTotal: Int = 0,
+    val guided: Boolean = false,       // true during warm-up/core/cool-down (no countdown timer)
+    val stepIndex: Int = 0,            // guided: current exercise (0-based)
+    val stepTotal: Int = 0,            // guided: total exercises in this round
 )
 
 /**
@@ -64,9 +67,15 @@ object WorkoutEngine {
             for (section in r.sections) for (round in section.rounds) {
                 if (round.isRest) continue
                 for (cue in round.cues) texts += cue.text
+                // Guided sections speak step announcements (not cues) plus counts.
+                round.guidedSteps?.forEach { texts += it.announce }
             }
-            // Common fixed callouts not stored as cues:
+            // Number/side vocabulary used by guided counting + fixed callouts. Caching
+            // these keeps ElevenLabs counting instant (no per-number network call).
+            for (n in 1..20) texts += "$n"
+            for (n in 1..20) texts += "and $n."
             texts += listOf(
+                "Left side.", "Right side.", "Switch.", "Switch sides.",
                 "Ten seconds remaining.", "Halfway there.", "One minute left.",
                 "Thirty seconds.", "3", "2", "1", "Rest.", "Workout complete. Well done."
             )
@@ -141,7 +150,12 @@ object WorkoutEngine {
 
         for ((slotIdx, slot) in slots.withIndex()) {
             val (si, ri, section, round) = slot
-            if (endBell) SoundFx.ringBell()
+
+            // ---- Guided sections (warm-up / core / cool-down): step-through, no timer ----
+            if (round.isGuided) {
+                elapsed = runGuided(si, ri, section, round, elapsed)
+                continue
+            }
 
             val announce: String
             var announceRate = 1f
@@ -198,6 +212,9 @@ object WorkoutEngine {
                     while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
                     delay(100); guard += 100
                 }
+                // Bell rings at the START of work — after "…ready, and—", not before
+                // the instructions. Signals the round is live.
+                if (endBell) SoundFx.ringBell()
             }
 
             val d = round.durationSec
@@ -243,10 +260,128 @@ object WorkoutEngine {
 
                 _state.value = _state.value.copy(secondsLeft = left, elapsedTotal = elapsed)
             }
+            // Bell at the END of a work round (not rests / breaks).
+            if (!round.isRest && endBell) SoundFx.singleBell()
         }
-        if (endBell) SoundFx.singleBell()
         tts?.speak("Workout complete. Well done.")
         _state.value = _state.value.copy(phase = WorkoutPhase.FINISHED, currentCue = "Workout complete. Well done.", currentCueIsCommand = false)
+    }
+
+    /**
+     * Execute a guided section (warm-up / core / cool-down). Unlike combat rounds
+     * this is NOT clock-driven: for each step we speak the announcement, WAIT for the
+     * voice to finish, then count reps at the step's cadence (each number awaited) or
+     * hold for holdSec with a spoken countdown. Because counting only begins after the
+     * announcement finishes, "1, 2" never stack behind it. No round bell, no time
+     * callouts. Length is whatever it takes.
+     */
+    private suspend fun runGuided(si: Int, ri: Int, section: Section, round: Round, startElapsed: Int): Int {
+        var elapsed = startElapsed
+        val steps = round.guidedSteps ?: return elapsed
+        // Exercise steps carry reps/hold; pure spoken lines (intro/outro) have neither.
+        val exerciseTotal = steps.count { it.reps > 0 || it.holdSec > 0 }
+        var exerciseIdx = 0
+
+        _state.value = _state.value.copy(
+            phase = WorkoutPhase.RUNNING,
+            sectionIndex = si, roundIndex = ri,
+            sectionTitle = section.title, roundLabel = round.label,
+            isRest = false, legend = "", guided = true,
+            stepIndex = 0, stepTotal = exerciseTotal, secondsLeft = 0,
+            elapsedTotal = elapsed,
+        )
+
+        for (step in steps) {
+            if (skipFlag) { skipFlag = false; break }
+            while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+
+            val isExercise = step.reps > 0 || step.holdSec > 0
+            if (isExercise) exerciseIdx++
+
+            _state.value = _state.value.copy(
+                currentCue = step.announce, currentCueIsCommand = false,
+                stepIndex = exerciseIdx, guided = true,
+            )
+            tts?.speak(step.announce, INTRO_RATE)
+            awaitSpeech()
+
+            when {
+                // Counted reps (optionally per side with a "Switch").
+                step.reps > 0 -> {
+                    if (step.perSide) {
+                        elapsed = countReps(step, "Left side.", elapsed)
+                        if (skipFlag) continue
+                        tts?.speak("Switch."); awaitSpeech()
+                        elapsed = countReps(step, "Right side.", elapsed)
+                    } else {
+                        elapsed = countReps(step, null, elapsed)
+                    }
+                }
+                // Timed hold (per side => hold, switch, hold) with a closing countdown.
+                step.holdSec > 0 -> {
+                    if (step.perSide) {
+                        elapsed = hold(step.holdSec, elapsed)
+                        if (skipFlag) continue
+                        tts?.speak("Switch sides."); awaitSpeech()
+                        elapsed = hold(step.holdSec, elapsed)
+                    } else {
+                        elapsed = hold(step.holdSec, elapsed)
+                    }
+                }
+            }
+        }
+        return elapsed
+    }
+
+    /** Speak-and-pace a set of counts. Returns updated elapsed. */
+    private suspend fun countReps(step: GuidedStep, sidePrompt: String?, startElapsed: Int): Int {
+        var elapsed = startElapsed
+        sidePrompt?.let { tts?.speak(it); awaitSpeech() }
+        val gapMs = (step.secPerCount.coerceAtLeast(1) * 1000L)
+        for (r in 1..step.reps) {
+            if (skipFlag) break
+            while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+            tts?.speak(if (r == step.reps) "and ${step.reps}." else "$r")
+            delay(gapMs)
+            elapsed += step.secPerCount.coerceAtLeast(1)
+            _state.value = _state.value.copy(elapsedTotal = elapsed)
+        }
+        return elapsed
+    }
+
+    /** Hold for [sec], counting down the last few seconds aloud. Returns updated elapsed. */
+    private suspend fun hold(sec: Int, startElapsed: Int): Int {
+        var elapsed = startElapsed
+        val cd = if (sec >= 8) 5 else 3
+        val quiet = (sec - cd).coerceAtLeast(0)
+        for (s in 0 until quiet) {
+            if (skipFlag) return elapsed
+            while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+            delay(1000); elapsed++
+            _state.value = _state.value.copy(elapsedTotal = elapsed)
+        }
+        for (n in cd downTo 1) {
+            if (skipFlag) return elapsed
+            while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+            tts?.speak("$n")
+            delay(1000); elapsed++
+            _state.value = _state.value.copy(elapsedTotal = elapsed)
+        }
+        return elapsed
+    }
+
+    /** Block until the speech engine has finished the current utterance(s), so the
+     *  next count/hold doesn't overlap it. Bounded so a silent/again-null engine
+     *  (TEXT_ONLY, or speech failure) can't hang the workout. */
+    private suspend fun awaitSpeech(maxMs: Int = 9000) {
+        var waited = 0
+        // Give TTS a beat to register the utterance as in-flight before polling.
+        delay(120); waited += 120
+        while (tts?.isSpeaking() == true && waited < maxMs) {
+            if (skipFlag) return
+            while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+            delay(100); waited += 100
+        }
     }
 
     private fun niceDuration(sec: Int): String = when {
