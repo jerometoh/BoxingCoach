@@ -111,7 +111,9 @@ class ElevenLabsEngine(
             return null
         }
         val tmp = File(dest.parentFile, dest.name + ".part")
-        conn.inputStream.use { input -> tmp.outputStream.use { out -> input.copyTo(out) } }
+        conn.inputStream.use { input ->
+            java.io.FileOutputStream(tmp).use { out -> input.copyTo(out) }
+        }
         conn.disconnect()
         if (tmp.length() <= 0) { tmp.delete(); return null }
         tmp.renameTo(dest)
