@@ -38,6 +38,8 @@ class SettingsStore(context: Context) {
         endBell = prefs.getBoolean("endBell", true),
         voiceName = prefs.getString("voiceName", "")!!,
         tryEmbeddedVoice = prefs.getBoolean("tryEmbeddedVoice", false),
+        elevenApiKey = prefs.getString("elevenApiKey", "")!!,
+        elevenVoiceId = prefs.getString("elevenVoiceId", "")!!,
     )
 
     fun save(s: AppSettings) {
@@ -51,6 +53,8 @@ class SettingsStore(context: Context) {
             .putBoolean("endBell", s.endBell)
             .putString("voiceName", s.voiceName)
             .putBoolean("tryEmbeddedVoice", s.tryEmbeddedVoice)
+            .putString("elevenApiKey", s.elevenApiKey)
+            .putString("elevenVoiceId", s.elevenVoiceId)
             .apply()
     }
 

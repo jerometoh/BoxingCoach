@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity() {
         historyStore = HistoryStore(this)
         SoundFx.init(applicationContext)
         CoachVoice.init(applicationContext)
+        val startupSettings = settingsStore.load()
+        CoachVoice.configureEleven(startupSettings.elevenApiKey, startupSettings.elevenVoiceId)
         WorkoutEngine.tts = CoachVoice.active
 
         // First-launch permissions
@@ -75,6 +77,8 @@ class MainActivity : ComponentActivity() {
             WorkoutEngine.warnSound = settings.warnSound
             WorkoutEngine.endBell = settings.endBell
             CoachVoice.systemEngine?.setVoice(settings.voiceName)
+            CoachVoice.configureEleven(settings.elevenApiKey, settings.elevenVoiceId)
+            WorkoutEngine.tts = CoachVoice.active
         }
         // Keep the screen awake only while a workout is actually on screen and running
         LaunchedEffect(screen, workoutState.phase, settings.keepScreenOn) {
@@ -396,7 +400,56 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
         Text("Duck music lowers Spotify / YouTube Music while cues are spoken.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        // ---- System voice picker ----
+        SectionHeader("Coach voice — ElevenLabs (expressive)")
+        Text("Paste an ElevenLabs API key to use the expressive cloud coach voice. Leave blank to use the system/neural TTS engine below. Audio for each phrase is generated once and cached, so repeat use stays within the free tier. Falls back to system voice when offline.",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedTextField(
+            value = s.elevenApiKey,
+            onValueChange = { onChange(s.copy(elevenApiKey = it.trim())) },
+            label = { Text("ElevenLabs API key") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = s.elevenVoiceId,
+            onValueChange = { onChange(s.copy(elevenVoiceId = it.trim())) },
+            label = { Text("Voice ID (optional — blank = default)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            if (CoachVoice.usingEleven) "Active: ElevenLabs expressive voice."
+            else "Active: system / neural TTS (no ElevenLabs key set).",
+            fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            color = if (CoachVoice.usingEleven) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // ---- Voice test panel (fast iteration on cue phrasing / voice) ----
+        SectionHeader("Test voice")
+        var testText by remember { mutableStateOf("Round two! Jab, cross, left hook — GO! Empty the tank!") }
+        OutlinedTextField(
+            value = testText,
+            onValueChange = { testText = it },
+            label = { Text("Cue to speak") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                CoachVoice.active?.let { it.cut(); it.speak(testText) }
+            }, modifier = Modifier.weight(1f)) { Text("Speak") }
+            OutlinedButton(onClick = { CoachVoice.active?.cut() }, modifier = Modifier.weight(1f)) {
+                Text("Stop")
+            }
+        }
+        val cachedNote = CoachVoice.elevenLabs?.let {
+            if (!it.isConfigured()) "System voice — no caching."
+            else if (it.isCached(testText)) "This exact phrase is cached (free replay)."
+            else "Not cached yet — first Speak will generate it (uses characters)."
+        } ?: ""
+        if (cachedNote.isNotBlank()) Text(cachedNote, fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        SectionHeader("Voice engine (fallback / no-key)")
         var voiceRefresh by remember { mutableStateOf(0) }
         val voices = remember(voiceRefresh) { CoachVoice.systemEngine?.availableVoices() ?: emptyList() }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,

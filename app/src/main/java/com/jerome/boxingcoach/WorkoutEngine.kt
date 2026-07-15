@@ -56,6 +56,22 @@ object WorkoutEngine {
     fun start(r: Routine) {
         stopInternal()
         routine = r
+        // Pre-generate & cache the expressive-voice audio for every cue in this
+        // routine up front (runs in the background during warm-up), so live
+        // playback is local and lag-free. No-op unless ElevenLabs is configured.
+        runCatching {
+            val texts = LinkedHashSet<String>()
+            for (section in r.sections) for (round in section.rounds) {
+                if (round.isRest) continue
+                for (cue in round.cues) texts += cue.text
+            }
+            // Common fixed callouts not stored as cues:
+            texts += listOf(
+                "Ten seconds remaining.", "Halfway there.", "One minute left.",
+                "Thirty seconds.", "3", "2", "1", "Rest.", "Workout complete. Well done."
+            )
+            CoachVoice.elevenLabs?.prewarm(texts)
+        }
         job = scope.launch { run(r) }
     }
 
