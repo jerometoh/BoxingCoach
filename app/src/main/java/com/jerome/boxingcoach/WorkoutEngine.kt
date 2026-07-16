@@ -22,6 +22,8 @@ data class WorkoutState(
     val sectionTitle: String = "",
     val roundLabel: String = "",
     val legend: String = "",
+    val nextRoundLabel: String = "",   // during rest: upcoming work round's label (preview)
+    val nextLegend: String = "",       // during rest: upcoming round's trigger legend (preview)
     val isRest: Boolean = false,
     val elapsedTotal: Int = 0,
     val guided: Boolean = false,       // true during warm-up/core/cool-down (no countdown timer)
@@ -189,6 +191,32 @@ object WorkoutEngine {
                     announce = "${round.label}. ${niceDuration(round.durationSec)}."
                 }
             }
+            // Look ahead to the next work round: its label + legend feed the rest-screen
+            // "NEXT ROUND" preview (shown for the whole rest so the combos become
+            // familiar), and — if it has an intro — the DELAYED spoken intro.
+            var restIntroAt = -1
+            var nextSlotIdx = -1
+            var nextLabel = ""
+            var nextLegendText = ""
+            if (round.isRest) {
+                val next = slots.getOrNull(slotIdx + 1)
+                if (next != null && !next.round.isRest) {
+                    nextLabel = next.round.label
+                    nextLegendText = next.round.legend
+                    if (next.round.cues.any { it.isIntro }) {
+                        nextSlotIdx = slotIdx + 1
+                        // Let the user actually REST FIRST: deliver the spoken intro in the
+                        // LATER part of the rest, reserving ~20s so even a two-combo intro
+                        // finishes before the bell — but never before the halfway point on
+                        // short rests.
+                        val reserve = 20
+                        restIntroAt = (round.durationSec - reserve)
+                            .coerceAtLeast(round.durationSec / 2)
+                            .coerceAtLeast(1)
+                    }
+                }
+            }
+
             tts?.speak(announce, announceRate)
 
             _state.value = WorkoutState(
@@ -200,21 +228,11 @@ object WorkoutEngine {
                 sectionTitle = section.title,
                 roundLabel = round.label,
                 legend = round.legend,
+                nextRoundLabel = nextLabel,
+                nextLegend = nextLegendText,
                 isRest = round.isRest,
                 elapsedTotal = elapsed,
             )
-
-            // During rest: schedule the NEXT work round's intro EARLY, so even a long
-            // two-combo intro has the whole rest to finish speaking before the bell.
-            var restIntroAt = -1
-            var nextSlotIdx = -1
-            if (round.isRest) {
-                val next = slots.getOrNull(slotIdx + 1)
-                if (next != null && !next.round.isRest && next.round.cues.any { it.isIntro }) {
-                    nextSlotIdx = slotIdx + 1
-                    restIntroAt = 3.coerceAtMost(round.durationSec / 2)
-                }
-            }
 
             // Before a work round's clock starts, let any intro finish speaking so
             // the first "Go" never lands on top of an unfinished instruction. The
@@ -234,6 +252,9 @@ object WorkoutEngine {
             val d = round.durationSec
             var t = 0
             val cueMap = round.cues.filter { !it.isIntro }.associateBy { it.offsetSec }
+            // Holds an encouragement callout that fell on a command second, so it can be
+            // spoken on the next command-free second instead of overlapping the command.
+            var pendingCallout: String? = null
             while (t < d) {
                 if (skipFlag) { skipFlag = false; break }
                 while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
@@ -262,18 +283,38 @@ object WorkoutEngine {
                 }
 
                 // ---- time callouts (work rounds only) ----
+                // Encouragement-style callouts (halfway / 1 min / 30 s) must NOT land on
+                // top of a spoken command. If a command is due this same second, the
+                // callout is deferred and spoken on the next command-free second (which,
+                // given commands are seconds apart, is almost always the very next tick —
+                // i.e. right after the command).
+                val hasCmdThisTick = cueMap.containsKey(t)
                 if (!round.isRest) {
+                    val callout: String? = when {
+                        d >= 120 && t == d / 2 -> halfwayLines.random(rng)
+                        d >= 150 && left == 60 -> oneMinLines.random(rng)
+                        d >= 90 && left == 30 -> thirtyLines.random(rng)
+                        else -> null
+                    }
                     when {
-                        d >= 120 && t == d / 2 -> tts?.speak(halfwayLines.random(rng))
-                        d >= 150 && left == 60 -> tts?.speak(oneMinLines.random(rng))
-                        d >= 90 && left == 30 -> tts?.speak(thirtyLines.random(rng))
+                        callout != null && hasCmdThisTick -> pendingCallout = callout
+                        callout != null -> tts?.speak(callout)
+                        pendingCallout != null && !hasCmdThisTick && left > 3 -> {
+                            tts?.speak(pendingCallout); pendingCallout = null
+                        }
+                    }
+                    // Time-critical callouts sit in the command-free tail, so they fire on
+                    // the exact second.
+                    when {
                         d >= 30 && left == 10 -> {
                             if (warnSound) SoundFx.clapper()
                             tts?.speak("Ten seconds remaining.")
                         }
                         left in 1..3 -> tts?.speak("$left")
                     }
-                } else if (d >= 30 && left == 10) {
+                } else if (d >= 30 && left == 10 && nextSlotIdx < 0) {
+                    // Only on a rest with no upcoming intro. When an intro is delivered
+                    // late in the rest, we skip this so "get ready" can't overlap it.
                     tts?.speak("Ten seconds. Get ready.")
                 }
 

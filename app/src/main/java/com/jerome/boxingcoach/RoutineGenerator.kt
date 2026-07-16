@@ -125,8 +125,8 @@ object RoutineGenerator {
         val steps = mutableListOf<GuidedStep>()
         val names = mutableListOf<String>()
         steps += GuidedStep(listOf(
-            "Let's warm up — ${picked.size} exercises, top to bottom. Follow my count.",
-            "Warm-up time. ${picked.size} exercises head to toe. Move with the count.",
+            "Let's warm up — ${picked.size} exercises, top to bottom. Move for the time on screen.",
+            "Warm-up time. ${picked.size} exercises head to toe. Keep moving till the timer's up.",
             "Warming up: ${picked.size} exercises from the top down. Loosen everything off."
         ).random(rng))
 
@@ -138,26 +138,33 @@ object RoutineGenerator {
                 i == picked.size - 1 -> "Last one"
                 else -> listOf("Next", "Now", "Moving on").random(rng)
             }
+            // Warm-up is now fully TIME-BASED: every move becomes a timed segment with an
+            // on-screen countdown, whatever its library kind. Rep / per-side moves are
+            // converted to a sensible duration (~ their rep count × cadence); holds keep
+            // their hold time. (countReps no longer applies to the warm-up.)
             steps += when (mv.kind) {
-                ComboLibrary.MoveKind.REP -> GuidedStep(
-                    announce = "$lead: $name.",
-                    name = name,
-                    reps = if (countReps) mv.reps else 0,
-                    secPerCount = mv.secPerCount,
-                )
-                ComboLibrary.MoveKind.PER_SIDE -> GuidedStep(
-                    announce = "$lead: $name. ${mv.reps} each side.",
-                    name = name,
-                    reps = if (countReps) mv.reps else 0,
-                    secPerCount = mv.secPerCount,
-                    perSide = true,
-                    holdSec = if (countReps) 0 else mv.reps * mv.secPerCount, // silent timed hold per side when not counting
-                )
                 ComboLibrary.MoveKind.HOLD -> GuidedStep(
-                    announce = "$lead: $name.",
+                    announce = "$lead: $name. ${mv.holdSec} seconds.",
                     name = name,
                     holdSec = mv.holdSec,
                 )
+                ComboLibrary.MoveKind.PER_SIDE -> {
+                    val dur = (mv.reps * mv.secPerCount).coerceIn(15, 30)
+                    GuidedStep(
+                        announce = "$lead: $name. $dur seconds each side.",
+                        name = name,
+                        perSide = true,
+                        holdSec = dur,
+                    )
+                }
+                ComboLibrary.MoveKind.REP -> {
+                    val dur = (mv.reps * mv.secPerCount).coerceIn(20, 40)
+                    GuidedStep(
+                        announce = "$lead: $name. $dur seconds.",
+                        name = name,
+                        holdSec = dur,
+                    )
+                }
             }
         }
         steps += GuidedStep("Warm-up done. Shake it out — let's get to work.")
@@ -312,13 +319,13 @@ object RoutineGenerator {
         } else {
             "Two combos. Combo one: ${renderedCombos[0]}. Combo two: ${renderedCombos[1]}. " +
                 "Again — one is ${renderedCombos[0]}, two is ${renderedCombos[1]}. " +
-                "On \"$goWord one\" or \"$goWord two\", throw that combo. " +
+                "On \"one\" or \"two\", throw that combo. " +
                 "Feint and jab in between. On \"$downWord\": $downMove."
         }
         val legend = if (renderedCombos.size == 1) {
             "$goWord → ${renderedCombos[0]}   ·   $downWord → $downMove"
         } else {
-            "$goWord 1 → ${renderedCombos[0]}   ·   $goWord 2 → ${renderedCombos[1]}   ·   $downWord → $downMove"
+            "One → ${renderedCombos[0]}   ·   Two → ${renderedCombos[1]}   ·   $downWord → $downMove"
         }
         val cues = mutableListOf(Cue(0, introText, isIntro = true))
 
@@ -350,7 +357,9 @@ object RoutineGenerator {
                     if (renderedCombos.size == 2) {
                         goToggle = !goToggle
                         comboIdx = if (goToggle) 1 else 2
-                        (if (goToggle) "$goWord one" else "$goWord two") to true
+                        // Spoken command is just the number — "One!" / "Two!" — matching
+                        // the big ONE! / TWO! on screen (not "Go one / Go two").
+                        (if (goToggle) "One!" else "Two!") to true
                     } else goWord to true
                 }
             }
