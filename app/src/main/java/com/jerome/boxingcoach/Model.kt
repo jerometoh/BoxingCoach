@@ -1,7 +1,5 @@
 package com.jerome.boxingcoach
 
-enum class Difficulty { BEGINNER, INTERMEDIATE, ADVANCED }
-enum class Intensity { LOW, MEDIUM, HIGH }
 enum class Stance { ORTHODOX, SOUTHPAW }
 enum class VoiceMode { DUCK_MUSIC, OVERLAY, TEXT_ONLY }
 enum class SectionType { WARMUP, SHADOW, BAG, CORE, COOLDOWN }
@@ -19,14 +17,26 @@ data class RoutineParams(
     val coreSec: Int = 300,
     val restSec: Int = 60,
     val restBetweenSectionsSec: Int = 120,
-    val difficulty: Difficulty = Difficulty.INTERMEDIATE,
-    val intensity: Intensity = Intensity.MEDIUM,
+    // Two independent 1–10 scales (replaced the old 3-option Difficulty/Intensity
+    // enums). complexity = how intricate combos & movements get; intensity = cardio
+    // load & pace. Old Beginner/Intermediate/Advanced map to roughly 2 / 5 / 8.
+    val complexity: Int = 5,
+    val intensity: Int = 5,
 )
 
 /** A single spoken/displayed instruction at an offset (seconds) into its round.
  *  isIntro = the pre-round explanation (combo assignment), shown/spoken once at t=0.
  *  isCommand = a short live trigger word ("Go", "Down", "Feint"...) rendered large. */
-data class Cue(val offsetSec: Int, val text: String, val isIntro: Boolean = false, val isCommand: Boolean = false)
+/** comboIndex: for multi-combo rounds, 1 or 2 identifies which assigned combo this
+ *  "go one / go two" command calls for — the workout screen renders it as a big
+ *  ONE! / TWO!. 0 for everything else (single-combo "go", "down", spacing, tips). */
+data class Cue(
+    val offsetSec: Int,
+    val text: String,
+    val isIntro: Boolean = false,
+    val isCommand: Boolean = false,
+    val comboIndex: Int = 0,
+)
 
 /** One step in a guided section (warm-up / core / cool-down). The engine speaks
  *  [announce], WAITS for speech to finish, then either counts [reps] at [secPerCount]
@@ -35,6 +45,7 @@ data class Cue(val offsetSec: Int, val text: String, val isIntro: Boolean = fals
  *  behind the announcement. Guided rounds have no fixed duration — length is emergent. */
 data class GuidedStep(
     val announce: String,
+    val name: String = "",     // clean exercise name shown on screen; announce is voice-only
     val reps: Int = 0,
     val secPerCount: Int = 2,
     val perSide: Boolean = false,
@@ -48,6 +59,7 @@ data class Round(
     val summary: String,           // short description shown in review screen
     val isRest: Boolean = false,
     val legend: String = "",       // trigger-word mapping shown on the workout screen, e.g. "Go → jab, cross · Down → two squats"
+    val combos: List<String> = emptyList(), // this round's assigned combo(s), indexed by Cue.comboIndex (1-based)
     val guidedSteps: List<GuidedStep>? = null,  // non-null => guided section (warm-up/core/cool-down)
     val exerciseNames: List<String> = emptyList(), // names shown in the review screen for guided sections
 ) {
@@ -79,8 +91,8 @@ data class Routine(
 data class HistoryEntry(
     val completedAt: Long,
     val durationSec: Int,
-    val difficulty: Difficulty,
-    val intensity: Intensity,
+    val complexity: Int,
+    val intensity: Int,
     val summary: String,
 )
 

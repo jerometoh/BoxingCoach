@@ -27,6 +27,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private enum class Screen { SETUP, REVIEW, WORKOUT, HISTORY, SETTINGS }
 
@@ -98,7 +99,7 @@ class MainActivity : ComponentActivity() {
                         HistoryEntry(
                             completedAt = System.currentTimeMillis(),
                             durationSec = workoutState.elapsedTotal,
-                            difficulty = it.params.difficulty,
+                            complexity = it.params.complexity,
                             intensity = it.params.intensity,
                             summary = it.sections.joinToString(" · ") { s -> s.title },
                         )
@@ -203,15 +204,14 @@ private fun SetupScreen(
         }
         item { ToggleRow("Cool-down", params.includeCooldown) { onParams(params.copy(includeCooldown = it)) } }
 
-        item { SectionHeader("Difficulty — combo & movement complexity") }
+        item { SectionHeader("Difficulty & intensity") }
         item {
-            SegmentedRow(Difficulty.entries.map { it.name.lowercase().replaceFirstChar(Char::uppercase) },
-                params.difficulty.ordinal) { onParams(params.copy(difficulty = Difficulty.entries[it])) }
+            ScaleRow("Combo complexity", "How intricate the combos and movements get.",
+                params.complexity) { onParams(params.copy(complexity = it)) }
         }
-        item { SectionHeader("Intensity — cardio load & pace") }
         item {
-            SegmentedRow(Intensity.entries.map { it.name.lowercase().replaceFirstChar(Char::uppercase) },
-                params.intensity.ordinal) { onParams(params.copy(intensity = Intensity.entries[it])) }
+            ScaleRow("Cardio intensity", "Pace, rest length, and how much conditioning gets mixed in.",
+                params.intensity) { onParams(params.copy(intensity = it)) }
         }
         item { Stepper("Rest between rounds (sec)", params.restSec, 30, 120, step = 15) { onParams(params.copy(restSec = it)) } }
         item { Stepper("Rest between segments — gear change (sec)", params.restBetweenSectionsSec, 30, 300, step = 30) { onParams(params.copy(restBetweenSectionsSec = it)) } }
@@ -333,34 +333,32 @@ private fun WorkoutScreen(
                     modifier = Modifier.padding(top = 6.dp)
                 )
             }
+            // Guided sections: which exercise of how many (only on actual exercises).
+            if (s.guided && s.stepTotal > 0 && (s.timed || s.repTotal > 0)) {
+                Text(
+                    "Exercise ${s.stepIndex.coerceAtLeast(1)} / ${s.stepTotal}",
+                    fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f),
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp)
+                )
+            }
         }
 
-        if (s.guided) {
-            Text(
-                if (s.stepTotal > 0) "Exercise ${s.stepIndex.coerceAtLeast(1)} / ${s.stepTotal}" else "Get ready",
-                fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                lineHeight = 44.sp
-            )
-        } else {
-            Text(
-                "%d:%02d".format(s.secondsLeft / 60, s.secondsLeft % 60),
-                fontSize = 104.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                lineHeight = 104.sp
-            )
+        // ---- Focal area: the single thing to do right now ----
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            when {
+                s.phase == WorkoutPhase.FINISHED -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("WORKOUT", fontSize = 34.sp, fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.85f))
+                    Text("COMPLETE", fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                }
+                s.guided -> GuidedFocus(s)
+                s.isRest -> RestFocus(s)
+                else -> WorkFocus(s)
+            }
         }
-
-        // The action: commands render large and bold; the longer pre-round
-        // explanation renders smaller since it's read once, not reacted to.
-        Text(
-            s.currentCue,
-            fontSize = if (s.currentCueIsCommand) 52.sp else if (s.guided) 32.sp else 22.sp,
-            fontWeight = if (s.currentCueIsCommand) FontWeight.ExtraBold else if (s.guided) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (s.currentCueIsCommand) Color(0xFFFFD54F) else Color.White.copy(alpha = 0.9f),
-            textAlign = TextAlign.Center,
-            lineHeight = if (s.currentCueIsCommand) 56.sp else if (s.guided) 38.sp else 28.sp,
-            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-            maxLines = if (s.currentCueIsCommand) 2 else 5,
-        )
 
         if (s.phase == WorkoutPhase.FINISHED) {
             Button(onClick = onDone, Modifier.fillMaxWidth().height(64.dp)) {
@@ -381,6 +379,89 @@ private fun WorkoutScreen(
     }
 }
 
+/** m:ss for a countdown. */
+private fun clock(sec: Int): String {
+    val v = sec.coerceAtLeast(0)
+    return "%d:%02d".format(v / 60, v % 60)
+}
+
+/** Combat round focal area: countdown timer above, the live command below —
+ *  a big gold ONE!/TWO! on multi-combo calls, "GET READY" before the first cue. */
+@Composable
+private fun WorkFocus(s: WorkoutState) {
+    val gold = Color(0xFFFFD54F)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(clock(s.secondsLeft), fontSize = 92.sp, fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.9f), lineHeight = 92.sp)
+        Spacer(Modifier.height(16.dp))
+        when {
+            s.comboCue > 0 -> {
+                Text("${comboWord(s.comboCue)}!", fontSize = 84.sp, fontWeight = FontWeight.ExtraBold,
+                    color = gold, lineHeight = 84.sp, maxLines = 1, textAlign = TextAlign.Center)
+                if (s.comboCueText.isNotBlank())
+                    Text(s.comboCueText, fontSize = 24.sp, fontWeight = FontWeight.SemiBold,
+                        color = Color.White, textAlign = TextAlign.Center, lineHeight = 28.sp,
+                        maxLines = 2, modifier = Modifier.padding(top = 4.dp))
+            }
+            s.currentCue.isBlank() ->
+                Text("GET READY", fontSize = 36.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.55f), textAlign = TextAlign.Center)
+            else ->
+                Text(s.currentCue,
+                    fontSize = if (s.currentCueIsCommand) 54.sp else 24.sp,
+                    fontWeight = if (s.currentCueIsCommand) FontWeight.ExtraBold else FontWeight.Medium,
+                    color = if (s.currentCueIsCommand) gold else Color.White.copy(alpha = 0.9f),
+                    textAlign = TextAlign.Center,
+                    lineHeight = if (s.currentCueIsCommand) 58.sp else 30.sp,
+                    maxLines = if (s.currentCueIsCommand) 2 else 4)
+        }
+    }
+}
+
+/** Rest focal area: just the label and the big countdown. */
+@Composable
+private fun RestFocus(s: WorkoutState) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("REST", fontSize = 24.sp, fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.7f), letterSpacing = 4.sp)
+        Text(clock(s.secondsLeft), fontSize = 104.sp, fontWeight = FontWeight.Bold,
+            color = Color.White, lineHeight = 104.sp)
+    }
+}
+
+/** Guided focal area (warm-up / core / cool-down): the exercise name and its
+ *  detail, then a live countdown for timed holds or a rep counter for counted
+ *  sets, plus a LEFT/RIGHT side prompt. No spoken narration on screen. */
+@Composable
+private fun GuidedFocus(s: WorkoutState) {
+    val gold = Color(0xFFFFD54F)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(s.exerciseName.uppercase().ifBlank { "GET READY" },
+            fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
+            textAlign = TextAlign.Center, lineHeight = 44.sp, maxLines = 3)
+        if (s.exerciseDetail.isNotBlank())
+            Text(s.exerciseDetail, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
+        if (s.timed)
+            Text("${s.secondsLeft}", fontSize = 88.sp, fontWeight = FontWeight.Bold,
+                color = gold, lineHeight = 88.sp)
+        else if (s.repTotal > 0)
+            Text("${s.repCount} / ${s.repTotal}", fontSize = 72.sp, fontWeight = FontWeight.Bold,
+                color = gold, lineHeight = 72.sp)
+        if (s.sidePrompt.isNotBlank())
+            Text(s.sidePrompt, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+    }
+}
+
 // ---------------------------------------------------------------- HISTORY
 
 @Composable
@@ -393,7 +474,7 @@ private fun HistoryScreen(entries: List<HistoryEntry>) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
                     Text(fmt.format(Date(e.completedAt)), fontWeight = FontWeight.Medium)
-                    Text("${e.durationSec / 60} min · ${e.difficulty.name.lowercase()} difficulty · ${e.intensity.name.lowercase()} intensity",
+                    Text("${e.durationSec / 60} min · complexity ${e.complexity}/10 · intensity ${e.intensity}/10",
                         fontSize = 13.sp)
                     Text(e.summary, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -558,6 +639,14 @@ private fun SettingsScreen(s: AppSettings, onChange: (AppSettings) -> Unit) {
 
 // ---------------------------------------------------------------- shared widgets
 
+/** Combo number → spoken-style word for the big in-workout ONE! / TWO! display. */
+private fun comboWord(n: Int): String = when (n) {
+    1 -> "ONE"
+    2 -> "TWO"
+    3 -> "THREE"
+    else -> n.toString()
+}
+
 /** "en-gb-x-gbb-local" → "English (GB) — gbb". Best effort; raw name fallback. */
 private fun friendlyVoiceName(raw: String): String {
     val parts = raw.split("-")
@@ -592,6 +681,26 @@ private fun Stepper(label: String, value: Int, min: Int, max: Int, step: Int = 1
             Text("$value", Modifier.padding(horizontal = 12.dp), fontSize = 16.sp)
             OutlinedButton(onClick = { if (value + step <= max) onChange(value + step) }) { Text("+") }
         }
+    }
+}
+
+/** A labelled 1–10 slider with a live value readout and a one-line hint. */
+@Composable
+private fun ScaleRow(label: String, hint: String, value: Int, onChange: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text("$value / 10", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary)
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt().coerceIn(1, 10)) },
+            valueRange = 1f..10f,
+            steps = 8, // 8 stops between the ends => 10 discrete values (1..10)
+        )
+        Text(hint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

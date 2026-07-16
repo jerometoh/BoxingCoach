@@ -2,6 +2,8 @@ package com.jerome.boxingcoach
 
 import android.content.Context
 import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import java.io.File
 
@@ -12,10 +14,33 @@ class HistoryStore(context: Context) {
 
     fun load(): List<HistoryEntry> {
         if (!file.exists()) return emptyList()
+        // Parsed field-by-field so pre-slider entries (which stored difficulty/intensity
+        // as enum strings) migrate to the 1–10 scale instead of failing the whole load.
         return runCatching {
-            val type = object : TypeToken<List<HistoryEntry>>() {}.type
-            gson.fromJson<List<HistoryEntry>>(file.readText(), type) ?: emptyList()
+            JsonParser.parseString(file.readText()).asJsonArray.map { el ->
+                val o = el.asJsonObject
+                HistoryEntry(
+                    completedAt = o.get("completedAt").asLong,
+                    durationSec = o.get("durationSec").asInt,
+                    complexity = scaleField(o, "complexity", "difficulty"),
+                    intensity = scaleField(o, "intensity", "intensity"),
+                    summary = o.get("summary")?.asString ?: "",
+                )
+            }
         }.getOrDefault(emptyList())
+    }
+
+    /** Read a 1–10 scale value: use the numeric field if present, else map a legacy
+     *  enum string (BEGINNER/LOW→2, INTERMEDIATE/MEDIUM→5, ADVANCED/HIGH→8). */
+    private fun scaleField(o: JsonObject, newKey: String, oldKey: String): Int {
+        o.get(newKey)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
+            ?.let { return it.asInt }
+        val s = o.get(oldKey)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+        return when (s?.uppercase()) {
+            "BEGINNER", "LOW" -> 2
+            "ADVANCED", "HIGH" -> 8
+            else -> 5
+        }
     }
 
     fun add(entry: HistoryEntry) {

@@ -1,5 +1,6 @@
 package com.jerome.boxingcoach
 
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 /**
@@ -22,6 +23,19 @@ object RoutineGenerator {
 
     private val attackWords = listOf("Go", "Hit", "Shoot")
     private val downWords = listOf("Down", "Drop")
+
+    /**
+     * Map a 1–10 scale onto three anchor values placed where the old
+     * Beginner/Intermediate/Advanced (and Low/Medium/High) options sat: scale
+     * 2 / 5 / 8. Piecewise-linear through those anchors, and it keeps the same
+     * slopes past them so 1 is genuinely gentler than old-Beginner and 10 harder
+     * than old-Advanced, rather than clamping flat at the ends.
+     */
+    private fun scale3(v: Int, a2: Float, a5: Float, a8: Float): Float {
+        val x = v.coerceIn(1, 10).toFloat()
+        return if (x <= 5f) a2 + (a5 - a2) * (x - 2f) / 3f
+        else a5 + (a8 - a5) * (x - 5f) / 3f
+    }
 
     fun generate(
         params: RoutineParams,
@@ -127,11 +141,13 @@ object RoutineGenerator {
             steps += when (mv.kind) {
                 ComboLibrary.MoveKind.REP -> GuidedStep(
                     announce = "$lead: $name.",
+                    name = name,
                     reps = if (countReps) mv.reps else 0,
                     secPerCount = mv.secPerCount,
                 )
                 ComboLibrary.MoveKind.PER_SIDE -> GuidedStep(
                     announce = "$lead: $name. ${mv.reps} each side.",
+                    name = name,
                     reps = if (countReps) mv.reps else 0,
                     secPerCount = mv.secPerCount,
                     perSide = true,
@@ -139,6 +155,7 @@ object RoutineGenerator {
                 )
                 ComboLibrary.MoveKind.HOLD -> GuidedStep(
                     announce = "$lead: $name.",
+                    name = name,
                     holdSec = mv.holdSec,
                 )
             }
@@ -168,7 +185,11 @@ object RoutineGenerator {
             val name = ComboLibrary.render(m, stance)
             names += name
             val lead = if (i == moves.size - 1) "Last one" else if (i == 0) "First" else "Next"
-            steps += GuidedStep(announce = "$lead: $name.", holdSec = holdEach)
+            steps += GuidedStep(
+                announce = "$lead: $name. $holdEach seconds. Go.",
+                name = name,
+                holdSec = holdEach,
+            )
         }
         steps += GuidedStep("Core done. Nice work.")
 
@@ -199,9 +220,9 @@ object RoutineGenerator {
             val lead = if (i == moves.size - 1) "Last one" else if (i == 0) "First" else "Next"
             steps += if (mv.kind == ComboLibrary.MoveKind.PER_SIDE) {
                 GuidedStep(announce = "$lead: $name. Hold one side, then switch.",
-                    holdSec = mv.holdSec, perSide = true)
+                    name = name, holdSec = mv.holdSec, perSide = true)
             } else {
-                GuidedStep(announce = "$lead: $name.", holdSec = mv.holdSec)
+                GuidedStep(announce = "$lead: $name.", name = name, holdSec = mv.holdSec)
             }
         }
         steps += GuidedStep("That's your cool-down. Good work today.")
@@ -222,11 +243,7 @@ object RoutineGenerator {
         roundCount: Int, roundSec: Int,
         p: RoutineParams, stance: Stance, rng: Random, coaching: Boolean = true
     ): Section {
-        val rest = when (p.intensity) {
-            Intensity.LOW -> p.restSec + 15
-            Intensity.MEDIUM -> p.restSec
-            Intensity.HIGH -> (p.restSec - 15).coerceAtLeast(30)
-        }
+        val rest = (p.restSec + scale3(p.intensity, 15f, 0f, -15f)).roundToInt().coerceAtLeast(30)
         val rounds = mutableListOf<Round>()
         for (i in 0 until roundCount) {
             rounds += workRound(type, i, roundCount, roundSec, p, stance, rng, coaching)
@@ -243,30 +260,26 @@ object RoutineGenerator {
     ): Round {
         val progress = if (total <= 1) 1f else index.toFloat() / (total - 1)
 
-        // ---- Tier (combo complexity ceiling) climbs with round position & difficulty ----
-        val ceiling = when (p.difficulty) {
-            Difficulty.BEGINNER -> 2
-            Difficulty.INTERMEDIATE -> 3
-            Difficulty.ADVANCED -> 4
-        }
-        val base = when (p.difficulty) {
-            Difficulty.BEGINNER -> 1f
-            Difficulty.INTERMEDIATE -> 1f
-            Difficulty.ADVANCED -> 2f
-        }
+        // ---- Tier (combo complexity ceiling) climbs with round position & complexity ----
+        val maxTier = ComboLibrary.combos.maxOf { it.tier }
+        val ceiling = scale3(p.complexity, 2f, 3f, 4f).roundToInt().coerceIn(1, maxTier)
+        val base = scale3(p.complexity, 1f, 1f, 2f).coerceIn(1f, ceiling.toFloat())
         val tier = (base + progress * (ceiling - base)).toInt().coerceIn(1, ceiling)
 
         // ---- How many combos assigned this round ----
-        val twoComboChance = when (p.difficulty) {
-            Difficulty.BEGINNER -> 0f
-            Difficulty.INTERMEDIATE -> if (progress > 0.6f) 0.35f else 0f
-            Difficulty.ADVANCED -> if (progress > 0.3f) 0.55f else 0.15f
-        }
+        // Higher complexity both raises the peak two-combo chance and lets two-combo
+        // rounds appear earlier (a non-zero floor), interpolated instead of stepped.
+        val twoFloor = scale3(p.complexity, 0f, 0f, 0.15f).coerceAtLeast(0f)
+        val twoPeak = scale3(p.complexity, 0f, 0.40f, 0.60f).coerceIn(0f, 0.75f)
+        val twoComboChance = (twoFloor + (twoPeak - twoFloor) * progress).coerceIn(0f, 0.75f)
         val comboCount = if (rng.nextFloat() < twoComboChance) 2 else 1
+
+        // Chance a tier-3+ combo is swapped for a combo+movement pairing (top complexity only).
+        val moveComboChance = scale3(p.complexity, 0f, 0f, 0.35f).coerceIn(0f, 0.6f)
 
         // ---- Pick the assigned combo(s) and this round's fixed conditioning move ----
         fun pickCombo(): String {
-            return if (tier >= 3 && p.difficulty == Difficulty.ADVANCED && rng.nextFloat() < 0.35f) {
+            return if (tier >= 3 && rng.nextFloat() < moveComboChance) {
                 ComboLibrary.comboWithMovement.random(rng)
             } else {
                 val pool = ComboLibrary.combos.filter { it.tier <= tier && it.tier >= (tier - 1).coerceAtLeast(1) }
@@ -310,16 +323,11 @@ object RoutineGenerator {
         val cues = mutableListOf(Cue(0, introText, isIntro = true))
 
         // ---- Command stream ----
-        val gapRange = when (p.intensity) {
-            Intensity.LOW -> 10..14
-            Intensity.MEDIUM -> 8..12
-            Intensity.HIGH -> 6..10
-        }
-        val downRatio = when (p.intensity) {
-            Intensity.LOW -> 0.08f
-            Intensity.MEDIUM -> if (progress > 0.4f) 0.16f else 0.10f
-            Intensity.HIGH -> if (progress > 0.2f) 0.26f else 0.16f
-        }
+        val gapLo = scale3(p.intensity, 10f, 8f, 6f).roundToInt().coerceAtLeast(3)
+        val gapHi = scale3(p.intensity, 14f, 12f, 10f).roundToInt().coerceAtLeast(gapLo + 2)
+        val downFloor = scale3(p.intensity, 0.08f, 0.10f, 0.16f)
+        val downPeak = scale3(p.intensity, 0.08f, 0.16f, 0.26f)
+        val downRatio = (downFloor + (downPeak - downFloor) * progress).coerceIn(0f, 0.4f)
         val introReserve = 8 // seconds before the first command
         // Chance that a given slot is a coaching tip rather than a command. Tips are
         // spoken between combos (not on "Go"), replacing the old rest-period tips.
@@ -329,6 +337,7 @@ object RoutineGenerator {
         while (t < durationSec - 12) {
             val roll = rng.nextFloat()
             var extraGap = 0
+            var comboIdx = 0
             val (text, isCmd) = when {
                 roll < coachRatio -> {
                     extraGap = 3 // give the longer line room before the next command
@@ -340,16 +349,17 @@ object RoutineGenerator {
                 else -> {
                     if (renderedCombos.size == 2) {
                         goToggle = !goToggle
+                        comboIdx = if (goToggle) 1 else 2
                         (if (goToggle) "$goWord one" else "$goWord two") to true
                     } else goWord to true
                 }
             }
-            cues += Cue(t, text, isCommand = isCmd)
-            t += rng.nextInt(gapRange.first, gapRange.last + 1) + extraGap
+            cues += Cue(t, text, isCommand = isCmd, comboIndex = comboIdx)
+            t += rng.nextInt(gapLo, gapHi + 1) + extraGap
         }
 
         val summary = "Tier $tier · " + renderedCombos.joinToString(" / ") + " · $downWord: $downMove"
-        return Round(label, durationSec, cues, summary, legend = legend)
+        return Round(label, durationSec, cues, summary, legend = legend, combos = renderedCombos)
     }
 
     private fun sectionNoun(type: SectionType) = when (type) {

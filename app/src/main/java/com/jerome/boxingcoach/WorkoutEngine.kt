@@ -27,6 +27,14 @@ data class WorkoutState(
     val guided: Boolean = false,       // true during warm-up/core/cool-down (no countdown timer)
     val stepIndex: Int = 0,            // guided: current exercise (0-based)
     val stepTotal: Int = 0,            // guided: total exercises in this round
+    val comboCue: Int = 0,             // multi-combo rounds: 1/2 => show big ONE!/TWO!; 0 = none
+    val comboCueText: String = "",     // the combo string for comboCue (shown under the big number)
+    val exerciseName: String = "",     // guided: clean exercise name (shown big; not the narration)
+    val exerciseDetail: String = "",   // guided: "45 seconds" / "10 reps each side" etc.
+    val timed: Boolean = false,        // guided: current step is a timed hold => show countdown timer
+    val sidePrompt: String = "",       // guided per-side: "LEFT" / "RIGHT" (else blank)
+    val repCount: Int = 0,             // guided rep exercises: reps done so far
+    val repTotal: Int = 0,             // guided rep exercises: reps this set (0 => not a rep exercise)
 )
 
 /**
@@ -79,6 +87,7 @@ object WorkoutEngine {
                 "Ten seconds remaining.", "Halfway there.", "One minute left.",
                 "Thirty seconds.", "3", "2", "1", "Rest.", "Workout complete. Well done."
             )
+            texts += holdEncouragement
             CoachVoice.elevenLabs?.prewarm(texts)
         }
         job = scope.launch { run(r) }
@@ -133,6 +142,11 @@ object WorkoutEngine {
     private val thirtyLines = listOf(
         "Thirty seconds.", "Thirty left — finish strong.", "Half a minute. Dig in."
     )
+    // Encouragement spoken partway through a timed core/hold exercise.
+    private val holdEncouragement = listOf(
+        "Keep going.", "Stay with it.", "Hold that pace.", "You've got this.",
+        "Don't stop now.", "Breathe and push."
+    )
 
     private suspend fun run(r: Routine) {
         var elapsed = 0
@@ -153,7 +167,7 @@ object WorkoutEngine {
 
             // ---- Guided sections (warm-up / core / cool-down): step-through, no timer ----
             if (round.isGuided) {
-                elapsed = runGuided(si, ri, section, round, elapsed)
+                elapsed = runGuided(si, ri, section, round, elapsed, rng)
                 continue
             }
 
@@ -181,7 +195,7 @@ object WorkoutEngine {
                 phase = WorkoutPhase.RUNNING,
                 sectionIndex = si, roundIndex = ri,
                 secondsLeft = round.durationSec,
-                currentCue = if (round.isRest) announce else (round.cues.firstOrNull { it.isIntro }?.text ?: announce),
+                currentCue = "",   // intro is spoken, not shown; screen stays clean until the first command
                 currentCueIsCommand = false,
                 sectionTitle = section.title,
                 roundLabel = round.label,
@@ -229,7 +243,12 @@ object WorkoutEngine {
 
                 cueMap[t]?.let { cue ->
                     tts?.speak(cue.text)
-                    _state.value = _state.value.copy(currentCue = cue.text, currentCueIsCommand = cue.isCommand)
+                    _state.value = _state.value.copy(
+                        currentCue = cue.text,
+                        currentCueIsCommand = cue.isCommand,
+                        comboCue = cue.comboIndex,
+                        comboCueText = round.combos.getOrNull(cue.comboIndex - 1) ?: "",
+                    )
                 }
 
                 // Rest-time intro of the next round (delivered slowly for clarity)
@@ -238,7 +257,7 @@ object WorkoutEngine {
                     val intro = next.round.cues.first { it.isIntro }
                     val text = "Next: ${next.round.label}. ${intro.text}"
                     tts?.speak(text, INTRO_RATE)
-                    _state.value = _state.value.copy(currentCue = text, currentCueIsCommand = false)
+                    _state.value = _state.value.copy(currentCue = "", currentCueIsCommand = false)
                     introDelivered += nextSlotIdx
                 }
 
@@ -275,7 +294,7 @@ object WorkoutEngine {
      * announcement finishes, "1, 2" never stack behind it. No round bell, no time
      * callouts. Length is whatever it takes.
      */
-    private suspend fun runGuided(si: Int, ri: Int, section: Section, round: Round, startElapsed: Int): Int {
+    private suspend fun runGuided(si: Int, ri: Int, section: Section, round: Round, startElapsed: Int, rng: Random): Int {
         var elapsed = startElapsed
         val steps = round.guidedSteps ?: return elapsed
         // Exercise steps carry reps/hold; pure spoken lines (intro/outro) have neither.
@@ -288,19 +307,45 @@ object WorkoutEngine {
             sectionTitle = section.title, roundLabel = round.label,
             isRest = false, legend = "", guided = true,
             stepIndex = 0, stepTotal = exerciseTotal, secondsLeft = 0,
-            elapsedTotal = elapsed,
+            elapsedTotal = elapsed, comboCue = 0, comboCueText = "",
+            exerciseName = "", exerciseDetail = "", timed = false,
+            sidePrompt = "", repCount = 0, repTotal = 0, currentCue = "",
         )
 
-        for (step in steps) {
+        for ((idx, step) in steps.withIndex()) {
             if (skipFlag) { skipFlag = false; break }
             while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
 
             val isExercise = step.reps > 0 || step.holdSec > 0
-            if (isExercise) exerciseIdx++
+            if (!isExercise) {
+                // Pure spoken line (intro / outro / transition): spoken, but the screen
+                // shows a clean label rather than the sentence.
+                val label = if (idx == steps.lastIndex) "DONE" else "GET READY"
+                _state.value = _state.value.copy(
+                    exerciseName = label, exerciseDetail = "", timed = false,
+                    sidePrompt = "", repCount = 0, repTotal = 0, secondsLeft = 0,
+                    currentCue = "", guided = true,
+                )
+                tts?.speak(step.announce, INTRO_RATE)
+                awaitSpeech()
+                continue
+            }
 
+            exerciseIdx++
+            val detail = when {
+                step.holdSec > 0 && step.perSide -> "${step.holdSec} seconds each side"
+                step.holdSec > 0 -> "${step.holdSec} seconds"
+                step.perSide -> "${step.reps} reps each side"
+                else -> "${step.reps} reps"
+            }
             _state.value = _state.value.copy(
-                currentCue = step.announce, currentCueIsCommand = false,
-                stepIndex = exerciseIdx, guided = true,
+                exerciseName = step.name.ifBlank { "Exercise" },
+                exerciseDetail = detail,
+                timed = step.holdSec > 0,
+                sidePrompt = "", repCount = 0,
+                repTotal = if (step.holdSec > 0) 0 else step.reps,
+                secondsLeft = step.holdSec,
+                currentCue = "", stepIndex = exerciseIdx, guided = true,
             )
             tts?.speak(step.announce, INTRO_RATE)
             awaitSpeech()
@@ -309,39 +354,49 @@ object WorkoutEngine {
                 // Counted reps (optionally per side with a "Switch").
                 step.reps > 0 -> {
                     if (step.perSide) {
-                        elapsed = countReps(step, "Left side.", elapsed)
+                        elapsed = countReps(step, "LEFT", elapsed)
                         if (skipFlag) continue
                         tts?.speak("Switch."); awaitSpeech()
-                        elapsed = countReps(step, "Right side.", elapsed)
+                        elapsed = countReps(step, "RIGHT", elapsed)
                     } else {
                         elapsed = countReps(step, null, elapsed)
                     }
                 }
-                // Timed hold (per side => hold, switch, hold) with a closing countdown.
+                // Timed hold (per side => hold, switch, hold) with a live countdown timer.
                 step.holdSec > 0 -> {
                     if (step.perSide) {
-                        elapsed = hold(step.holdSec, elapsed)
+                        _state.value = _state.value.copy(sidePrompt = "LEFT")
+                        elapsed = hold(step.holdSec, elapsed, rng)
                         if (skipFlag) continue
                         tts?.speak("Switch sides."); awaitSpeech()
-                        elapsed = hold(step.holdSec, elapsed)
+                        _state.value = _state.value.copy(sidePrompt = "RIGHT")
+                        elapsed = hold(step.holdSec, elapsed, rng)
                     } else {
-                        elapsed = hold(step.holdSec, elapsed)
+                        elapsed = hold(step.holdSec, elapsed, rng)
                     }
                 }
             }
         }
+        // Leaving the section: clear guided-only visual fields.
+        _state.value = _state.value.copy(
+            sidePrompt = "", repTotal = 0, timed = false, exerciseDetail = "",
+        )
         return elapsed
     }
 
-    /** Speak-and-pace a set of counts. Returns updated elapsed. */
-    private suspend fun countReps(step: GuidedStep, sidePrompt: String?, startElapsed: Int): Int {
+    /** Speak-and-pace a set of counts, updating the on-screen rep counter. */
+    private suspend fun countReps(step: GuidedStep, side: String?, startElapsed: Int): Int {
         var elapsed = startElapsed
-        sidePrompt?.let { tts?.speak(it); awaitSpeech() }
+        _state.value = _state.value.copy(sidePrompt = side ?: "", repTotal = step.reps, repCount = 0)
+        if (side != null) {
+            tts?.speak(if (side == "LEFT") "Left side." else "Right side."); awaitSpeech()
+        }
         val gapMs = (step.secPerCount.coerceAtLeast(1) * 1000L)
         for (r in 1..step.reps) {
             if (skipFlag) break
             while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
             tts?.speak(if (r == step.reps) "and ${step.reps}." else "$r")
+            _state.value = _state.value.copy(repCount = r)
             delay(gapMs)
             elapsed += step.secPerCount.coerceAtLeast(1)
             _state.value = _state.value.copy(elapsedTotal = elapsed)
@@ -349,23 +404,23 @@ object WorkoutEngine {
         return elapsed
     }
 
-    /** Hold for [sec], counting down the last few seconds aloud. Returns updated elapsed. */
-    private suspend fun hold(sec: Int, startElapsed: Int): Int {
+    /** Timed hold: drives the on-screen countdown every second, drops in one
+     *  encouragement line around halfway (longer holds), and speaks the final
+     *  few seconds aloud. Returns updated elapsed. */
+    private suspend fun hold(sec: Int, startElapsed: Int, rng: Random): Int {
         var elapsed = startElapsed
         val cd = if (sec >= 8) 5 else 3
-        val quiet = (sec - cd).coerceAtLeast(0)
-        for (s in 0 until quiet) {
+        val halfway = sec / 2
+        _state.value = _state.value.copy(secondsLeft = sec, timed = true)
+        for (remaining in sec downTo 1) {
             if (skipFlag) return elapsed
             while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+            when {
+                remaining <= cd -> tts?.speak("$remaining")
+                sec >= 20 && remaining == halfway -> tts?.speak(holdEncouragement.random(rng))
+            }
             delay(1000); elapsed++
-            _state.value = _state.value.copy(elapsedTotal = elapsed)
-        }
-        for (n in cd downTo 1) {
-            if (skipFlag) return elapsed
-            while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
-            tts?.speak("$n")
-            delay(1000); elapsed++
-            _state.value = _state.value.copy(elapsedTotal = elapsed)
+            _state.value = _state.value.copy(secondsLeft = remaining - 1, elapsedTotal = elapsed)
         }
         return elapsed
     }
