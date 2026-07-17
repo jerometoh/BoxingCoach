@@ -326,16 +326,6 @@ private fun WorkoutScreen(
                 fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f),
                 textAlign = TextAlign.Center, maxLines = 1
             )
-            // Trigger-word legend for this round: e.g. "Go → jab, cross · Down → two squats"
-            if (s.legend.isNotBlank() && !s.isRest) {
-                Text(
-                    s.legend,
-                    fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.75f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
-            }
             // Guided sections: which exercise of how many (only on actual exercises).
             if (s.guided && s.stepTotal > 0 && (s.timed || s.repTotal > 0)) {
                 Text(
@@ -388,102 +378,142 @@ private fun clock(sec: Int): String {
     return "%d:%02d".format(v / 60, v % 60)
 }
 
-/** Combat round focal area: countdown timer above, the live command below —
- *  a big gold ONE!/TWO! on multi-combo calls, "GET READY" before the first cue. */
+/** Combat round focal area, three clearly-distinct tiers:
+ *   STANDING (cyan)  — the persistent rule for the whole round (theme)
+ *   COMMAND  (gold)  — the live, changing call (GO! / ONE! / a movement)
+ *   COMMANDS (gold)  — the legend of what each call means
+ *  Different colours + labels make it obvious which is the standing instruction and
+ *  which is the momentary command. */
 @Composable
 private fun WorkFocus(s: WorkoutState) {
     val gold = Color(0xFFFFD54F)
+    val cyan = Color(0xFF4FC3F7)
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Timer sits above as a secondary reference; the command/combo below is the hero.
-        Text(clock(s.secondsLeft), fontSize = 66.sp, fontWeight = FontWeight.Bold,
-            color = Color.White.copy(alpha = 0.75f), lineHeight = 66.sp)
-        Spacer(Modifier.height(20.dp))
+        // 1) STANDING INSTRUCTION — persistent rule for the round (distinct colour).
+        if (s.standing.isNotBlank()) StandingBanner(cyan, s.standing)
+
+        // 2) Timer — secondary reference.
+        Text(clock(s.secondsLeft), fontSize = 50.sp, fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.7f), lineHeight = 50.sp)
+
+        // 3) COMMAND — the live, changing call (hero).
         when {
-            // Multi-combo call: giant ONE! / TWO! plus the combo, boxed to pop off the bg.
-            s.comboCue > 0 -> CommandBox(gold) {
-                Text("${comboWord(s.comboCue)}!", fontSize = 96.sp, fontWeight = FontWeight.Black,
-                    color = gold, lineHeight = 96.sp, maxLines = 1, textAlign = TextAlign.Center)
+            s.comboCue > 0 -> LabeledCommand(gold, "COMMAND") {
+                Text("${comboWord(s.comboCue)}!", fontSize = 82.sp, fontWeight = FontWeight.Black,
+                    color = gold, lineHeight = 82.sp, maxLines = 1, textAlign = TextAlign.Center)
                 if (s.comboCueText.isNotBlank())
-                    Text(s.comboCueText, fontSize = 34.sp, fontWeight = FontWeight.Bold,
-                        color = Color.White, textAlign = TextAlign.Center, lineHeight = 38.sp,
-                        maxLines = 2, modifier = Modifier.padding(top = 8.dp))
+                    Text(s.comboCueText, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                        color = Color.White, textAlign = TextAlign.Center, lineHeight = 34.sp,
+                        maxLines = 2, modifier = Modifier.padding(top = 6.dp))
             }
             s.currentCue.isBlank() ->
-                Text("GET READY", fontSize = 40.sp, fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.55f), textAlign = TextAlign.Center)
-            // Single trigger word ("GO", "HIT", "DOWN"…): big and boxed.
-            s.currentCueIsCommand -> CommandBox(gold) {
-                Text(s.currentCue, fontSize = 68.sp, fontWeight = FontWeight.Black,
-                    color = gold, textAlign = TextAlign.Center, lineHeight = 72.sp, maxLines = 2)
+                Text("GET READY", fontSize = 36.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.5f), textAlign = TextAlign.Center)
+            s.currentCueIsCommand -> LabeledCommand(gold, "COMMAND") {
+                Text(s.currentCue, fontSize = 58.sp, fontWeight = FontWeight.Black,
+                    color = gold, textAlign = TextAlign.Center, lineHeight = 62.sp, maxLines = 2)
             }
             // Non-command spoken line (a coaching tip): present but understated.
             else ->
-                Text(s.currentCue, fontSize = 26.sp, fontWeight = FontWeight.Medium,
+                Text(s.currentCue, fontSize = 24.sp, fontWeight = FontWeight.Medium,
                     color = Color.White.copy(alpha = 0.9f), textAlign = TextAlign.Center,
-                    lineHeight = 32.sp, maxLines = 4)
+                    lineHeight = 30.sp, maxLines = 4)
+        }
+
+        // 4) COMMANDS legend — what each call means.
+        if (s.legend.isNotBlank()) LegendBox(gold, "COMMANDS", s.legend)
+    }
+}
+
+/** Persistent standing-instruction banner (the round's theme). */
+@Composable
+private fun StandingBanner(accent: Color, text: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("STANDING", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            color = accent.copy(alpha = 0.85f), letterSpacing = 3.sp)
+        Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(accent.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
+                .border(BorderStroke(1.5.dp, accent.copy(alpha = 0.5f)), RoundedCornerShape(18.dp))
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = accent,
+                textAlign = TextAlign.Center, lineHeight = 32.sp, maxLines = 2)
         }
     }
 }
 
-/** Highlighted container that makes the live command/combo pop off the background. */
+/** The live command, in a highlighted box with a small label above it. */
 @Composable
-private fun CommandBox(accent: Color, content: @Composable ColumnScope.() -> Unit) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(accent.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
-            .border(BorderStroke(2.dp, accent.copy(alpha = 0.5f)), RoundedCornerShape(24.dp))
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, content = content)
+private fun LabeledCommand(accent: Color, label: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            color = accent.copy(alpha = 0.85f), letterSpacing = 3.sp)
+        Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(accent.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                .border(BorderStroke(2.dp, accent.copy(alpha = 0.5f)), RoundedCornerShape(24.dp))
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, content = content)
+        }
     }
 }
 
-/** Rest focal area: just the label and the big countdown. */
+/** A low-key reference box (the trigger legend), labelled to match the command tier. */
+@Composable
+private fun LegendBox(accent: Color, label: String, text: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            color = accent.copy(alpha = 0.7f), letterSpacing = 3.sp)
+        Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(accent.copy(alpha = 0.07f), RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, accent.copy(alpha = 0.3f)), RoundedCornerShape(16.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.9f), textAlign = TextAlign.Center, lineHeight = 21.sp)
+        }
+    }
+}
+
+/** Rest focal area: the countdown, then an "UP NEXT" preview of the coming round using
+ *  the SAME standing / commands tiers the round itself shows, so it's familiar. */
 @Composable
 private fun RestFocus(s: WorkoutState) {
     val gold = Color(0xFFFFD54F)
+    val cyan = Color(0xFF4FC3F7)
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text("REST", fontSize = 22.sp, fontWeight = FontWeight.Bold,
             color = Color.White.copy(alpha = 0.7f), letterSpacing = 4.sp)
-        Text(clock(s.secondsLeft), fontSize = 88.sp, fontWeight = FontWeight.Bold,
-            color = Color.White, lineHeight = 88.sp)
+        Text(clock(s.secondsLeft), fontSize = 72.sp, fontWeight = FontWeight.Bold,
+            color = Color.White, lineHeight = 72.sp)
 
-        // Preview the upcoming round for the whole rest, so the combos become familiar
-        // before the bell. The spoken intro still comes later in the rest.
         if (s.nextRoundLabel.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .background(gold.copy(alpha = 0.10f), RoundedCornerShape(20.dp))
-                    .border(BorderStroke(1.dp, gold.copy(alpha = 0.4f)), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("NEXT ROUND", fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                        color = gold, letterSpacing = 3.sp)
-                    Text(s.nextRoundLabel.substringAfter("— ").ifBlank { s.nextRoundLabel },
-                        fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                        textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
-                    if (s.nextLegend.isNotBlank())
-                        Text(s.nextLegend, fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.85f), textAlign = TextAlign.Center,
-                            lineHeight = 22.sp, modifier = Modifier.padding(top = 6.dp))
-                }
-            }
+            Spacer(Modifier.height(4.dp))
+            Text("UP NEXT · ${s.nextRoundLabel.substringAfter("— ").ifBlank { s.nextRoundLabel }}",
+                fontSize = 15.sp, fontWeight = FontWeight.Bold, color = gold,
+                letterSpacing = 1.sp, textAlign = TextAlign.Center, maxLines = 1)
+            if (s.nextStanding.isNotBlank()) StandingBanner(cyan, s.nextStanding)
+            if (s.nextLegend.isNotBlank()) LegendBox(gold, "COMMANDS", s.nextLegend)
         }
     }
 }

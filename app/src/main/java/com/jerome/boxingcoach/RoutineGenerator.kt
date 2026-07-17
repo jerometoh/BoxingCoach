@@ -320,11 +320,14 @@ object RoutineGenerator {
         val label = "${sectionNoun(type)} — Round ${index + 1} of $total"
 
         // ---- Intro (delivered during the preceding rest, or at round start) + legend ----
+        // `standing` is the persistent theme headline shown in its own on-screen banner;
+        // `legend` is just the trigger→meaning mapping for the live commands.
+        val standing = theme.label
         val introText: String
         val legend: String
         if (punchless) {
             introText = "${theme.say} I'll call each movement — flow from one to the next. No punches this round."
-            legend = "${theme.label}   ·   follow the called movements"
+            legend = "Follow the called movements"
         } else {
             val triggerLine = if (renderedCombos.size == 2)
                 "Combo one: ${renderedCombos[0]}. Combo two: ${renderedCombos[1]}. On \"one\" or \"two\", throw that combo."
@@ -334,12 +337,11 @@ object RoutineGenerator {
             introText = (if (theme.say.isNotEmpty()) theme.say + " " else "") +
                 triggerLine + " Feint and jab to hold range in between." + downLine
 
-            val head = if (theme.label.isNotEmpty()) "${theme.label}   ·   " else ""
             val trig = if (renderedCombos.size == 2)
                 "One → ${renderedCombos[0]}   ·   Two → ${renderedCombos[1]}"
             else "$goWord → ${renderedCombos[0]}"
             val downLeg = if (downMove.isNotEmpty()) "   ·   $downWord → $downMove" else ""
-            legend = head + trig + downLeg
+            legend = trig + downLeg
         }
         val cues = mutableListOf(Cue(0, introText, isIntro = true))
 
@@ -442,7 +444,7 @@ object RoutineGenerator {
         val summary = "$summaryHead · $summaryBody" +
             (if (downMove.isNotEmpty()) " · $downWord: $downMove" else "") +
             (if (hasFinisher) " · finisher" else "")
-        return Round(label, durationSec, cues, summary, legend = legend, combos = renderedCombos, hasFinisher = hasFinisher)
+        return Round(label, durationSec, cues, summary, legend = legend, combos = renderedCombos, hasFinisher = hasFinisher, standing = standing)
     }
 
     // ---- Standing instructions (round themes) ----

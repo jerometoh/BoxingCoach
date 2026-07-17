@@ -21,8 +21,10 @@ data class WorkoutState(
     val currentCueIsCommand: Boolean = false,
     val sectionTitle: String = "",
     val roundLabel: String = "",
+    val standing: String = "",          // work round: the round's standing instruction (theme), persistent
     val legend: String = "",
     val nextRoundLabel: String = "",   // during rest: upcoming work round's label (preview)
+    val nextStanding: String = "",     // during rest: upcoming round's standing instruction (preview)
     val nextLegend: String = "",       // during rest: upcoming round's trigger legend (preview)
     val isRest: Boolean = false,
     val elapsedTotal: Int = 0,
@@ -198,11 +200,13 @@ object WorkoutEngine {
             var nextSlotIdx = -1
             var nextLabel = ""
             var nextLegendText = ""
+            var nextStandingText = ""
             if (round.isRest) {
                 val next = slots.getOrNull(slotIdx + 1)
                 if (next != null && !next.round.isRest) {
                     nextLabel = next.round.label
                     nextLegendText = next.round.legend
+                    nextStandingText = next.round.standing
                     if (next.round.cues.any { it.isIntro }) {
                         nextSlotIdx = slotIdx + 1
                         // Let the user actually REST FIRST: deliver the spoken intro in the
@@ -227,8 +231,10 @@ object WorkoutEngine {
                 currentCueIsCommand = false,
                 sectionTitle = section.title,
                 roundLabel = round.label,
+                standing = round.standing,
                 legend = round.legend,
                 nextRoundLabel = nextLabel,
+                nextStanding = nextStandingText,
                 nextLegend = nextLegendText,
                 isRest = round.isRest,
                 elapsedTotal = elapsed,
@@ -456,7 +462,10 @@ object WorkoutEngine {
      *  few seconds aloud. Returns updated elapsed. */
     private suspend fun hold(sec: Int, startElapsed: Int, rng: Random): Int {
         var elapsed = startElapsed
-        val cd = if (sec >= 8) 5 else 3
+        // Count only the final 3 seconds. A 5-count put "five" and "four" back-to-back,
+        // which bunched audibly when TTS start-latency varied between ticks; 3-2-1 matches
+        // the round-end countdown and stays crisp.
+        val cd = 3
         val halfway = sec / 2
         _state.value = _state.value.copy(secondsLeft = sec, timed = true)
         for (remaining in sec downTo 1) {
