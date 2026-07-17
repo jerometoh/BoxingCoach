@@ -58,6 +58,7 @@ data class Round(
     val cues: List<Cue>,
     val summary: String,           // short description shown in review screen
     val isRest: Boolean = false,
+    val hasFinisher: Boolean = false, // round ends on a forced-intensity burst that owns the last ~10-14s (engine stays quiet then)
     val legend: String = "",       // trigger-word mapping shown on the workout screen, e.g. "Go → jab, cross · Down → two squats"
     val combos: List<String> = emptyList(), // this round's assigned combo(s), indexed by Cue.comboIndex (1-based)
     val guidedSteps: List<GuidedStep>? = null,  // non-null => guided section (warm-up/core/cool-down)

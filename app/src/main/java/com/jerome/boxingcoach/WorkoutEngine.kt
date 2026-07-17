@@ -304,13 +304,19 @@ object WorkoutEngine {
                         }
                     }
                     // Time-critical callouts sit in the command-free tail, so they fire on
-                    // the exact second.
-                    when {
-                        d >= 30 && left == 10 -> {
-                            if (warnSound) SoundFx.clapper()
-                            tts?.speak("Ten seconds remaining.")
+                    // the exact second — UNLESS the round has its own end finisher, which
+                    // scripts the last stretch itself (its own "power shots…/N in a row" and
+                    // countdown). We keep only the 10-second clapper as an audio marker then.
+                    if (round.hasFinisher) {
+                        if (warnSound && d >= 30 && left == 10) SoundFx.clapper()
+                    } else {
+                        when {
+                            d >= 30 && left == 10 -> {
+                                if (warnSound) SoundFx.clapper()
+                                tts?.speak("Ten seconds remaining.")
+                            }
+                            left in 1..3 -> tts?.speak("$left")
                         }
-                        left in 1..3 -> tts?.speak("$left")
                     }
                 } else if (d >= 30 && left == 10 && nextSlotIdx < 0) {
                     // Only on a rest with no upcoming intro. When an intro is delivered
