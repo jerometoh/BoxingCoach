@@ -272,25 +272,12 @@ object RoutineGenerator {
         val punchless = theme.punchless
         val allowDown = theme.allowDown && !punchless
 
-        // ---- Tier (combo complexity ceiling) climbs with round position & complexity.
-        // Only used by the FREE theme, which draws from the tiered library. ----
-        val maxTier = ComboLibrary.combos.maxOf { it.tier }
-        val ceiling = scale3(p.complexity, 2f, 3f, 4f).roundToInt().coerceIn(1, maxTier)
+        // ---- Target complexity climbs with round position & complexity. Feeds the
+        // assembler's target score (used by every theme except the fixed-vocab ones). ----
+        val ceiling = scale3(p.complexity, 2f, 3f, 5f).roundToInt().coerceIn(1, 5)
         val base = scale3(p.complexity, 1f, 1f, 2f).coerceIn(1f, ceiling.toFloat())
         val tier = (base + progress * (ceiling - base)).toInt().coerceIn(1, ceiling)
-        val moveComboChance = scale3(p.complexity, 0f, 0f, 0.35f).coerceIn(0f, 0.6f)
-
-        // Tiered pick for the FREE theme; returns (combo text, action count).
-        fun pickComboTiered(): Pair<String, Int> {
-            return if (tier >= 3 && rng.nextFloat() < moveComboChance) {
-                val s = ComboLibrary.comboWithMovement.random(rng)
-                s to (s.count { it == ',' } + 1)
-            } else {
-                val pool = ComboLibrary.combos.filter { it.tier <= tier && it.tier >= (tier - 1).coerceAtLeast(1) }
-                val c = pool.random(rng)
-                c.text to c.punches
-            }
-        }
+        val targetScore = 1.5 + tier * 1.9   // tier 1 ≈ 3.4 … tier 5 ≈ 11
 
         // ---- How many combos this round (theme sets the ceiling; complexity the chance) ----
         val twoFloor = scale3(p.complexity, 0f, 0f, 0.15f).coerceAtLeast(0f)
@@ -298,19 +285,31 @@ object RoutineGenerator {
         val twoComboChance = (twoFloor + (twoPeak - twoFloor) * progress).coerceIn(0f, 0.75f)
         val comboCount = if (theme.maxCombos >= 2 && rng.nextFloat() < twoComboChance) 2 else 1
 
-        // ---- Assign the round's combo(s): from the theme's vocab, or the tiered library ----
+        // ---- Assign the round's combo(s): the assembler builds them under the theme's
+        // constraints (fixed-vocab themes like jab-only / double-jab-cross use their vocab). ----
+        fun oneCombo(): Pair<String, Int> {
+            val c = when (theme.builder) {
+                Builder.FREE -> ComboAssembler.free(targetScore, stance, rng)
+                Builder.LEAD -> ComboAssembler.leadOnly(targetScore, stance, rng)
+                Builder.BODY -> ComboAssembler.bodyOnly(targetScore, stance, rng)
+                Builder.COUNTER -> ComboAssembler.counters(targetScore, stance, rng)
+                Builder.TWO -> ComboAssembler.exact(2, stance, rng)
+                Builder.THREE -> ComboAssembler.exact(3, stance, rng)
+                null -> { val v = theme.vocab!!.random(rng); return ComboLibrary.render(v.first, stance) to v.second }
+            }
+            return c.text to c.actionCount
+        }
         val assignedPairs = mutableListOf<Pair<String, Int>>()
         if (!punchless) {
             var guard = 0
             while (assignedPairs.size < comboCount && guard < 30) {
-                val c = if (theme.vocab != null) theme.vocab.random(rng) else pickComboTiered()
+                val c = oneCombo()
                 if (assignedPairs.none { it.first == c.first }) assignedPairs += c
                 guard++
             }
-            if (assignedPairs.isEmpty())
-                assignedPairs += if (theme.vocab != null) theme.vocab.random(rng) else pickComboTiered()
+            if (assignedPairs.isEmpty()) assignedPairs += oneCombo()
         }
-        val renderedCombos = assignedPairs.map { ComboLibrary.render(it.first, stance) }
+        val renderedCombos = assignedPairs.map { it.first }   // already stance-rendered
         val lens = assignedPairs.map { it.second }
         val downMove = if (allowDown) ComboLibrary.render(ComboLibrary.downMoves.random(rng), stance) else ""
 
@@ -449,37 +448,25 @@ object RoutineGenerator {
 
     // ---- Standing instructions (round themes) ----
     // A theme governs the whole round. Simple themes allow up to 2 combos + a down-move;
-    // harder ones keep the live calls minimal. `vocab` is (call text, action count);
-    // null vocab = draw from the tiered library (the FREE theme). Built against the
-    // current flat combo library; will move onto the structured combo model later.
+    // harder ones keep the live calls minimal. Most themes generate via the weight-aware
+    // ComboAssembler (`builder`); jab-only / double-jab-cross use a fixed `vocab`;
+    // movement-only is punchless and draws from `vocab`.
+    private enum class Builder { FREE, LEAD, BODY, COUNTER, TWO, THREE }
+
     private class Theme(
         val say: String,
         val label: String,
         val maxCombos: Int,
         val allowDown: Boolean,
         val punchless: Boolean = false,
+        val builder: Builder? = null,
         val vocab: List<Pair<String, Int>>? = null,
     )
 
-    private val twoPunchVocab by lazy { ComboLibrary.combos.filter { it.punches == 2 }.map { it.text to it.punches } }
-    private val threePunchVocab by lazy { ComboLibrary.combos.filter { it.punches == 3 }.map { it.text to it.punches } }
-    private val leadOnlyVocab = listOf(
-        "Jab" to 1, "{L} hook" to 1, "{L} uppercut" to 1, "Double jab" to 2,
-        "Jab, {L} hook" to 2, "Jab, {L} uppercut" to 2, "{L} hook to the body, {L} hook to the head" to 2,
-    )
-    private val bodyOnlyVocab = listOf(
-        "Jab to the body" to 1, "Cross to the body" to 1, "{L} hook to the body" to 1,
-        "Cross to the body, {L} hook to the body" to 2, "Jab to the body, cross to the body" to 2,
-        "{R} uppercut to the body" to 1, "{L} hook to the body, {R} uppercut to the body" to 2,
-    )
-    private val counterVocab = listOf(
-        "Slip {R}, cross" to 2, "Jab, slip {R}, cross" to 3, "One-two, roll under, {L} hook" to 3,
-        "Slip {L}, {L} hook to the body, {L} hook to the head" to 3, "Roll under, cross, {L} hook" to 3,
-    )
     private val moveOnlyVocab = listOf(
-        "Slip {L}" to 1, "Slip {R}" to 1, "Roll under" to 1, "Duck under" to 1, "Step back" to 1,
-        "Step {L}" to 1, "Step {R}" to 1, "Pivot {L}" to 1, "Pivot {R}" to 1, "Angle out {L}" to 1,
-        "Angle out {R}" to 1, "Circle {L}" to 1, "Circle {R}" to 1, "Block and reset" to 1,
+        "Slip {L}" to 1, "Slip {R}" to 1, "Roll {L}" to 1, "Roll {R}" to 1, "Duck under" to 1,
+        "Step back" to 1, "Step {L}" to 1, "Step {R}" to 1, "Pivot {L}" to 1, "Pivot {R}" to 1,
+        "Circle {L}" to 1, "Circle {R}" to 1, "Block {L}" to 1, "Block {R}" to 1,
         "Parry the jab" to 1, "Slip {L}, slip {R}" to 2, "Bob and weave" to 1,
     )
 
@@ -489,15 +476,15 @@ object RoutineGenerator {
         val hard = complexity >= 4
         val notFirst = index > 0
         val pool = mutableListOf<Pair<Theme, Int>>()
-        pool += Theme("", "", 2, true) to 3 // FREE — tiered library, current behaviour
-        pool += Theme("Any two-punch combos this round — sharp and clean.", "2-PUNCH", 2, true, vocab = twoPunchVocab) to 3
+        pool += Theme("", "", 2, true, builder = Builder.FREE) to 3
+        pool += Theme("Any two-punch combos this round — sharp and clean.", "2-PUNCH", 2, true, builder = Builder.TWO) to 3
         pool += Theme("Single jabs only. Vary the speed, level and rhythm.", "JAB ONLY", 1, false, vocab = listOf("Jab" to 1)) to 2
         pool += Theme("Double jab, then cross — same combo every rep. Sharpen it.", "DOUBLE JAB–CROSS", 1, true, vocab = listOf("Double jab, cross" to 3)) to 2
-        pool += Theme("Lead hand only — jabs, hooks and uppercuts off the lead.", "LEAD HAND ONLY", 2, true, vocab = leadOnlyVocab) to 2
-        pool += Theme("Body shots only. Bend the knees and dig in.", "BODY ONLY", 2, true, vocab = bodyOnlyVocab) to 2
+        pool += Theme("Lead hand only — jabs, hooks and uppercuts off the lead.", "LEAD HAND ONLY", 2, true, builder = Builder.LEAD) to 2
+        pool += Theme("Body shots only. Bend the knees and dig in.", "BODY ONLY", 2, true, builder = Builder.BODY) to 2
         if (hard) {
-            pool += Theme("Any three-punch combos — flow them together.", "3-PUNCH", 2, true, vocab = threePunchVocab) to 3
-            if (notFirst) pool += Theme("Counter work — slip or roll first, then fire back.", "COUNTERS", 1, false, vocab = counterVocab) to 2
+            pool += Theme("Any three-punch combos — flow them together.", "3-PUNCH", 2, true, builder = Builder.THREE) to 3
+            if (notFirst) pool += Theme("Counter work — slip or roll first, then fire back.", "COUNTERS", 1, false, builder = Builder.COUNTER) to 2
             if (notFirst) pool += Theme("No punches — movement and defence only. Slips, rolls, pivots, footwork.", "MOVEMENT ONLY", 1, false, punchless = true, vocab = moveOnlyVocab) to 2
         }
         val totalW = pool.sumOf { it.second }
