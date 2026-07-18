@@ -481,7 +481,6 @@ object RoutineGenerator {
         pool += Theme("Single jabs only. Vary the speed, level and rhythm.", "JAB ONLY", 1, false, vocab = listOf("Jab" to 1)) to 2
         pool += Theme("Double jab, then cross — same combo every rep. Sharpen it.", "DOUBLE JAB–CROSS", 1, true, vocab = listOf("Double jab, cross" to 3)) to 2
         pool += Theme("Lead hand only — jabs, hooks and uppercuts off the lead.", "LEAD HAND ONLY", 2, true, builder = Builder.LEAD) to 2
-        pool += Theme("Body shots only. Bend the knees and dig in.", "BODY ONLY", 2, true, builder = Builder.BODY) to 2
         if (hard) {
             pool += Theme("Any three-punch combos — flow them together.", "3-PUNCH", 2, true, builder = Builder.THREE) to 3
             if (notFirst) pool += Theme("Counter work — slip or roll first, then fire back.", "COUNTERS", 1, false, builder = Builder.COUNTER) to 2
