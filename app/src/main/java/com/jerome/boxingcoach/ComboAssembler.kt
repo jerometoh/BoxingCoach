@@ -32,8 +32,6 @@ object ComboAssembler {
     )
     private class Trans(val say: String, val leaves: Bal, val family: String)
 
-    private fun Punch.isStraightBody() = shape == PShape.STR && level == PLevel.BODY
-
     private val ANY = setOf(Bal.L, Bal.N, Bal.R)
 
     // A punch is illegal only from the opposite loaded foot (e.g. a lead hook can't come
@@ -106,10 +104,6 @@ object ComboAssembler {
                 w = if (p.shape == PShape.STR) (if (p.num == 1) 6.0 else 2.5) else 0.15
                 if (p.level == PLevel.BODY && levelOnly == null) w *= 0.5
             } else {
-                // No consecutive straight body shots. A straight shot to the body leaves the
-                // boxer bent in and exposed; he has to come back out of it immediately (upstairs
-                // or move), not dig a second straight one and sit there longer.
-                if (prev.isStraightBody() && p.isStraightBody()) continue
                 if (p.num == prev.num && p.level == prev.level && p.num != 1) w *= 0.12 // identical repeat: rare
                 w *= if (p.hand == prev.hand) {
                     if (p.shape == prev.shape && p.level == prev.level) 0.4 else 0.85     // same hand: prefer variation
@@ -180,8 +174,7 @@ object ComboAssembler {
                     val fits = PUNCHES.filter {
                         cur in it.needs &&
                             (opts.handOnly == null || it.hand == opts.handOnly) &&
-                            (opts.levelOnly == null || it.level == opts.levelOnly) &&
-                            !(prev != null && prev!!.isStraightBody() && it.isStraightBody())
+                            (opts.levelOnly == null || it.level == opts.levelOnly)
                     }
                     if (fits.isNotEmpty()) p = fits.random(rng)
                 }
