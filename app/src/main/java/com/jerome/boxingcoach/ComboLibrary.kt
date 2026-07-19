@@ -58,6 +58,22 @@ object ComboLibrary {
         "Freestyle — mix it up" to 3,
     )
 
+    // ---- Open-ended live command calls ----
+    // Spoken in full during a round as a command that DIFFERS from the standing instruction.
+    // Unlike the numbered combos these aren't pre-assigned — the boxer improvises to fit.
+    val openCommands = listOf(
+        "Any two punches",
+        "Any three punches",
+        "Any four punches",
+        "A combo off a feint",
+        "Combo starting with a feint",
+        "Two to the body, then move",
+        "Any combo ending on a hook",
+        "Finish upstairs — any combo",
+        "Fast hands — freestyle",
+        "Your sharpest combo",
+    )
+
     // ---- Defensive movement / footwork cues (appended or standalone) ----
     val movements = listOf(
         "Slip {L}", "Slip {R}", "Roll under", "Step back",

@@ -38,6 +38,11 @@ data class Cue(
     val comboIndex: Int = 0,
 )
 
+/** One reference card on the workout screen: a trigger label and what it maps to,
+ *  e.g. ("ONE", "Jab, cross, left hook") or ("DOWN", "two squats"). The screen splits
+ *  the text on ", " so a combo is shown one action per line (easier to read at a glance). */
+data class CommandRef(val label: String, val text: String)
+
 /** One step in a guided section (warm-up / core / cool-down). The engine speaks
  *  [announce], WAITS for speech to finish, then either counts [reps] at [secPerCount]
  *  cadence (doubled with a "Switch" if [perSide]) or holds for [holdSec] with a
@@ -59,8 +64,10 @@ data class Round(
     val summary: String,           // short description shown in review screen
     val isRest: Boolean = false,
     val hasFinisher: Boolean = false, // round ends on a forced-intensity burst that owns the last ~10-14s (engine stays quiet then)
-    val standing: String = "",     // the round's standing instruction (theme headline), e.g. "BODY ONLY"; "" = none
-    val legend: String = "",       // trigger-word mapping shown on the workout screen, e.g. "Go → jab, cross · Down → two squats"
+    val standing: String = "",     // the round's standing instruction headline, e.g. "SINGLE JABS"; "" = none
+    val standingHint: String = "", // one-line detail shown under the standing headline, e.g. "vary height & count"
+    val legend: String = "",       // legacy flat legend string (kept for compatibility; UI now uses commandRefs)
+    val commandRefs: List<CommandRef> = emptyList(), // split reference cards (One/Two/Down) shown on the workout screen
     val combos: List<String> = emptyList(), // this round's assigned combo(s), indexed by Cue.comboIndex (1-based)
     val guidedSteps: List<GuidedStep>? = null,  // non-null => guided section (warm-up/core/cool-down)
     val exerciseNames: List<String> = emptyList(), // names shown in the review screen for guided sections

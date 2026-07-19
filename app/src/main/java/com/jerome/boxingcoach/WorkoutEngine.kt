@@ -21,11 +21,15 @@ data class WorkoutState(
     val currentCueIsCommand: Boolean = false,
     val sectionTitle: String = "",
     val roundLabel: String = "",
-    val standing: String = "",          // work round: the round's standing instruction (theme), persistent
+    val standing: String = "",          // work round: the round's standing instruction headline, persistent
+    val standingHint: String = "",      // work round: one-line detail under the standing headline
     val legend: String = "",
+    val commandRefs: List<CommandRef> = emptyList(), // work round: split command cards (One/Two/Down)
     val nextRoundLabel: String = "",   // during rest: upcoming work round's label (preview)
     val nextStanding: String = "",     // during rest: upcoming round's standing instruction (preview)
-    val nextLegend: String = "",       // during rest: upcoming round's trigger legend (preview)
+    val nextStandingHint: String = "", // during rest: upcoming round's standing detail (preview)
+    val nextLegend: String = "",       // during rest: upcoming round's legend (legacy; unused by new UI)
+    val nextCommandRefs: List<CommandRef> = emptyList(), // during rest: upcoming round's command cards (preview)
     val isRest: Boolean = false,
     val elapsedTotal: Int = 0,
     val guided: Boolean = false,       // true during warm-up/core/cool-down (no countdown timer)
@@ -186,11 +190,15 @@ object WorkoutEngine {
             } else {
                 val preDelivered = slotIdx in introDelivered
                 val intro = round.cues.firstOrNull { it.isIntro }
-                if (intro != null && !preDelivered) {
-                    announce = "${round.label}. ${niceDuration(round.durationSec)}. ${intro.text}"
-                    announceRate = INTRO_RATE   // slow, for clarity
-                } else {
-                    announce = "${round.label}. ${niceDuration(round.durationSec)}."
+                announce = when {
+                    intro != null && !preDelivered -> {
+                        announceRate = INTRO_RATE   // slow, for clarity
+                        "${round.label}. ${niceDuration(round.durationSec)}. ${intro.text}"
+                    }
+                    // Intro already delivered during the preceding rest — don't repeat the
+                    // label on top of it; the bell signals the start.
+                    preDelivered -> ""
+                    else -> "${round.label}. ${niceDuration(round.durationSec)}."
                 }
             }
             // Look ahead to the next work round: its label + legend feed the rest-screen
@@ -201,19 +209,23 @@ object WorkoutEngine {
             var nextLabel = ""
             var nextLegendText = ""
             var nextStandingText = ""
+            var nextStandingHintText = ""
+            var nextRefs = emptyList<CommandRef>()
             if (round.isRest) {
                 val next = slots.getOrNull(slotIdx + 1)
                 if (next != null && !next.round.isRest) {
                     nextLabel = next.round.label
                     nextLegendText = next.round.legend
                     nextStandingText = next.round.standing
+                    nextStandingHintText = next.round.standingHint
+                    nextRefs = next.round.commandRefs
                     if (next.round.cues.any { it.isIntro }) {
                         nextSlotIdx = slotIdx + 1
                         // Let the user actually REST FIRST: deliver the spoken intro in the
                         // LATER part of the rest, reserving ~20s so even a two-combo intro
                         // finishes before the bell — but never before the halfway point on
                         // short rests.
-                        val reserve = 20
+                        val reserve = 22
                         restIntroAt = (round.durationSec - reserve)
                             .coerceAtLeast(round.durationSec / 2)
                             .coerceAtLeast(1)
@@ -221,7 +233,7 @@ object WorkoutEngine {
                 }
             }
 
-            tts?.speak(announce, announceRate)
+            if (announce.isNotBlank()) tts?.speak(announce, announceRate)
 
             _state.value = WorkoutState(
                 phase = WorkoutPhase.RUNNING,
@@ -232,10 +244,14 @@ object WorkoutEngine {
                 sectionTitle = section.title,
                 roundLabel = round.label,
                 standing = round.standing,
+                standingHint = round.standingHint,
                 legend = round.legend,
+                commandRefs = round.commandRefs,
                 nextRoundLabel = nextLabel,
                 nextStanding = nextStandingText,
+                nextStandingHint = nextStandingHintText,
                 nextLegend = nextLegendText,
+                nextCommandRefs = nextRefs,
                 isRest = round.isRest,
                 elapsedTotal = elapsed,
             )
@@ -245,7 +261,7 @@ object WorkoutEngine {
             // round's duration is preserved — this wait sits before t=0, not inside it.
             if (!round.isRest) {
                 var guard = 0
-                while (tts?.isSpeaking() == true && guard < 12000) {
+                while (tts?.isSpeaking() == true && guard < 25000) {
                     if (skipFlag) break
                     while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
                     delay(100); guard += 100

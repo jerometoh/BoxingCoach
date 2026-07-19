@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -391,31 +392,30 @@ private fun WorkFocus(s: WorkoutState) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 1) STANDING INSTRUCTION — persistent rule for the round (distinct colour).
-        if (s.standing.isNotBlank()) StandingBanner(cyan, s.standing)
+        // 1) STANDING INSTRUCTION — the round's unprompted default (distinct colour).
+        if (s.standing.isNotBlank()) StandingBanner(cyan, s.standing, s.standingHint)
 
         // 2) Timer — secondary reference.
-        Text(clock(s.secondsLeft), fontSize = 50.sp, fontWeight = FontWeight.Bold,
-            color = Color.White.copy(alpha = 0.7f), lineHeight = 50.sp)
+        Text(clock(s.secondsLeft), fontSize = 44.sp, fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.7f), lineHeight = 44.sp)
 
-        // 3) COMMAND — the live, changing call (hero).
+        // 3) COMMAND — the live call (hero). Combos are listed one action per line.
         when {
             s.comboCue > 0 -> LabeledCommand(gold, "COMMAND") {
-                Text("${comboWord(s.comboCue)}!", fontSize = 82.sp, fontWeight = FontWeight.Black,
-                    color = gold, lineHeight = 82.sp, maxLines = 1, textAlign = TextAlign.Center)
+                Text("${comboWord(s.comboCue)}!", fontSize = 68.sp, fontWeight = FontWeight.Black,
+                    color = gold, lineHeight = 68.sp, maxLines = 1, textAlign = TextAlign.Center)
                 if (s.comboCueText.isNotBlank())
-                    Text(s.comboCueText, fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                        color = Color.White, textAlign = TextAlign.Center, lineHeight = 34.sp,
-                        maxLines = 2, modifier = Modifier.padding(top = 6.dp))
+                    ComboLines(s.comboCueText, Color.White, 26.sp, 30.sp,
+                        modifier = Modifier.padding(top = 8.dp))
             }
             s.currentCue.isBlank() ->
                 Text("GET READY", fontSize = 36.sp, fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.5f), textAlign = TextAlign.Center)
             s.currentCueIsCommand -> LabeledCommand(gold, "COMMAND") {
-                Text(s.currentCue, fontSize = 58.sp, fontWeight = FontWeight.Black,
-                    color = gold, textAlign = TextAlign.Center, lineHeight = 62.sp, maxLines = 2)
+                Text(s.currentCue, fontSize = 46.sp, fontWeight = FontWeight.Black,
+                    color = gold, textAlign = TextAlign.Center, lineHeight = 50.sp, maxLines = 3)
             }
             // Non-command spoken line (a coaching tip): present but understated.
             else ->
@@ -424,14 +424,62 @@ private fun WorkFocus(s: WorkoutState) {
                     lineHeight = 30.sp, maxLines = 4)
         }
 
-        // 4) COMMANDS legend — what each call means.
-        if (s.legend.isNotBlank()) LegendBox(gold, "COMMANDS", s.legend)
+        // 4) COMMANDS reference — one split card per call, combos listed vertically.
+        CommandCards(gold, s.commandRefs)
     }
 }
 
-/** Persistent standing-instruction banner (the round's theme). */
+/** Render a combo string ("Jab, cross, left hook") as one action per line — easier to
+ *  read at a glance mid-round than a long horizontal line. */
 @Composable
-private fun StandingBanner(accent: Color, text: String) {
+private fun ComboLines(
+    text: String, color: Color, fontSize: TextUnit, lineHeight: TextUnit,
+    fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
+        text.split(", ").forEach { part ->
+            Text(part.replaceFirstChar { it.uppercase() }, fontSize = fontSize, fontWeight = fontWeight,
+                color = color, textAlign = TextAlign.Center, lineHeight = lineHeight)
+        }
+    }
+}
+
+/** The round's command reference, split into one bordered box per call (ONE / TWO / DOWN),
+ *  each with its combo listed vertically. Replaces the old single-line legend. */
+@Composable
+private fun CommandCards(accent: Color, refs: List<CommandRef>) {
+    if (refs.isEmpty()) return
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        Text("COMMANDS", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            color = accent.copy(alpha = 0.7f), letterSpacing = 3.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            refs.forEach { ref ->
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .background(accent.copy(alpha = 0.07f), RoundedCornerShape(14.dp))
+                        .border(BorderStroke(1.dp, accent.copy(alpha = 0.3f)), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        Text(ref.label, fontSize = 13.sp, fontWeight = FontWeight.Black,
+                            color = accent, letterSpacing = 1.sp)
+                        Spacer(Modifier.height(4.dp))
+                        ComboLines(ref.text, Color.White.copy(alpha = 0.9f), 13.sp, 16.sp,
+                            fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Persistent standing-instruction banner: the round's unprompted default (headline + a
+ *  one-line detail). Distinct from the momentary COMMAND tier below it. */
+@Composable
+private fun StandingBanner(accent: Color, text: String, hint: String = "") {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("STANDING", fontSize = 12.sp, fontWeight = FontWeight.Bold,
             color = accent.copy(alpha = 0.85f), letterSpacing = 3.sp)
@@ -441,11 +489,17 @@ private fun StandingBanner(accent: Color, text: String) {
                 .fillMaxWidth()
                 .background(accent.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
                 .border(BorderStroke(1.5.dp, accent.copy(alpha = 0.5f)), RoundedCornerShape(18.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(text, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = accent,
-                textAlign = TextAlign.Center, lineHeight = 32.sp, maxLines = 2)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = accent,
+                    textAlign = TextAlign.Center, lineHeight = 30.sp, maxLines = 2)
+                if (hint.isNotBlank())
+                    Text(hint, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                        color = accent.copy(alpha = 0.85f), textAlign = TextAlign.Center,
+                        lineHeight = 18.sp, maxLines = 2, modifier = Modifier.padding(top = 3.dp))
+            }
         }
     }
 }
@@ -512,8 +566,8 @@ private fun RestFocus(s: WorkoutState) {
             Text("UP NEXT · ${s.nextRoundLabel.substringAfter("— ").ifBlank { s.nextRoundLabel }}",
                 fontSize = 15.sp, fontWeight = FontWeight.Bold, color = gold,
                 letterSpacing = 1.sp, textAlign = TextAlign.Center, maxLines = 1)
-            if (s.nextStanding.isNotBlank()) StandingBanner(cyan, s.nextStanding)
-            if (s.nextLegend.isNotBlank()) LegendBox(gold, "COMMANDS", s.nextLegend)
+            if (s.nextStanding.isNotBlank()) StandingBanner(cyan, s.nextStanding, s.nextStandingHint)
+            CommandCards(gold, s.nextCommandRefs)
         }
     }
 }

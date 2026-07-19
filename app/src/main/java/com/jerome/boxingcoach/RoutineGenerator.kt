@@ -21,7 +21,6 @@ import kotlin.random.Random
  */
 object RoutineGenerator {
 
-    private val attackWords = listOf("Go", "Hit", "Shoot")
     private val downWords = listOf("Down", "Drop")
 
     /**
@@ -261,235 +260,252 @@ object RoutineGenerator {
         return Section(type, title, rounds)
     }
 
+    private fun comboSay(idx: Int) = when (idx) { 1 -> "One!"; 2 -> "Two!"; 3 -> "Three!"; else -> "Go!" }
+    private fun comboLabel(idx: Int) = when (idx) { 1 -> "ONE"; 2 -> "TWO"; 3 -> "THREE"; else -> "GO" }
+
     private fun workRound(
         type: SectionType, index: Int, total: Int, durationSec: Int,
         p: RoutineParams, stance: Stance, rng: Random, coaching: Boolean = true
     ): Round {
         val progress = if (total <= 1) 1f else index.toFloat() / (total - 1)
 
-        // ---- Standing instruction (theme) for this round ----
-        val theme = pickTheme(index, total, p.complexity, rng)
-        val punchless = theme.punchless
-        val allowDown = theme.allowDown && !punchless
+        // ---- Standing instruction: the unprompted default for this round ----
+        val st = pickStanding(index, total, p.complexity, rng)
+        val punchless = st.punchless
+        val allowDown = st.allowDown && !punchless
 
-        // ---- Target complexity climbs with round position & complexity. Feeds the
-        // assembler's target score (used by every theme except the fixed-vocab ones). ----
+        // ---- Combo complexity climbs with round position & the complexity setting ----
         val ceiling = scale3(p.complexity, 2f, 3f, 5f).roundToInt().coerceIn(1, 5)
         val base = scale3(p.complexity, 1f, 1f, 2f).coerceIn(1f, ceiling.toFloat())
         val tier = (base + progress * (ceiling - base)).toInt().coerceIn(1, ceiling)
-        val targetScore = 1.5 + tier * 1.9   // tier 1 ≈ 3.4 … tier 5 ≈ 11
+        val targetScore = 1.5 + tier * 1.9
 
-        // ---- How many combos this round (theme sets the ceiling; complexity the chance) ----
+        // ---- Numbered combos assigned to this round (called live as One! / Two!) ----
         val twoFloor = scale3(p.complexity, 0f, 0f, 0.15f).coerceAtLeast(0f)
         val twoPeak = scale3(p.complexity, 0f, 0.40f, 0.60f).coerceIn(0f, 0.75f)
-        val twoComboChance = (twoFloor + (twoPeak - twoFloor) * progress).coerceIn(0f, 0.75f)
-        val comboCount = if (theme.maxCombos >= 2 && rng.nextFloat() < twoComboChance) 2 else 1
+        val twoChance = (twoFloor + (twoPeak - twoFloor) * progress).coerceIn(0f, 0.75f)
+        val comboCount = if (st.maxCombos >= 2 && rng.nextFloat() < twoChance) 2 else 1
 
-        // ---- Assign the round's combo(s): the assembler builds them under the theme's
-        // constraints (fixed-vocab themes like jab-only / double-jab-cross use their vocab). ----
         fun oneCombo(): Pair<String, Int> {
-            val c = when (theme.builder) {
+            val c = when (st.builder) {
                 Builder.FREE -> ComboAssembler.free(targetScore, stance, rng)
                 Builder.LEAD -> ComboAssembler.leadOnly(targetScore, stance, rng)
-                Builder.BODY -> ComboAssembler.bodyOnly(targetScore, stance, rng)
+                Builder.BODY -> ComboAssembler.free(targetScore, stance, rng)   // body-only retired
                 Builder.COUNTER -> ComboAssembler.counters(targetScore, stance, rng)
                 Builder.TWO -> ComboAssembler.exact(2, stance, rng)
                 Builder.THREE -> ComboAssembler.exact(3, stance, rng)
-                null -> { val v = theme.vocab!!.random(rng); return ComboLibrary.render(v.first, stance) to v.second }
+                null -> { val v = st.vocab!!.random(rng); return ComboLibrary.render(v.first, stance) to v.second }
             }
             return c.text to c.actionCount
         }
-        val assignedPairs = mutableListOf<Pair<String, Int>>()
+
+        val assigned = mutableListOf<Pair<String, Int>>()
         if (!punchless) {
             var guard = 0
-            while (assignedPairs.size < comboCount && guard < 30) {
+            while (assigned.size < comboCount && guard < 30) {
                 val c = oneCombo()
-                if (assignedPairs.none { it.first == c.first }) assignedPairs += c
+                if (assigned.none { it.first == c.first }) assigned += c
                 guard++
             }
-            if (assignedPairs.isEmpty()) assignedPairs += oneCombo()
+            if (assigned.isEmpty()) assigned += oneCombo()
         }
-        val renderedCombos = assignedPairs.map { it.first }   // already stance-rendered
-        val lens = assignedPairs.map { it.second }
+        val combos = assigned.map { it.first }
+        val lens = assigned.map { it.second }
         val downMove = if (allowDown) ComboLibrary.render(ComboLibrary.downMoves.random(rng), stance) else ""
-
-        // ---- This round's trigger vocabulary ----
-        val goWord = attackWords.random(rng)
         val downWord = downWords.random(rng)
-        val label = "${sectionNoun(type)} — Round ${index + 1} of $total"
 
-        // ---- Intro (delivered during the preceding rest, or at round start) + legend ----
-        // `standing` is the persistent theme headline shown in its own on-screen banner;
-        // `legend` is just the trigger→meaning mapping for the live commands.
-        val standing = theme.label
+        val label = "${sectionNoun(type)} \u2014 Round ${index + 1} of $total"
+
+        // ---- Intro (spoken during the preceding rest, or at round start) ----
         val introText: String
-        val legend: String
         if (punchless) {
-            introText = "${theme.say} I'll call each movement — flow from one to the next. No punches this round."
-            legend = "Follow the called movements"
+            introText = "${st.say} I'll call each movement \u2014 flow between them on your own in between. No punches this round."
         } else {
-            val triggerLine = if (renderedCombos.size == 2)
-                "Combo one: ${renderedCombos[0]}. Combo two: ${renderedCombos[1]}. On \"one\" or \"two\", throw that combo."
-            else
-                "On \"$goWord\", throw: ${renderedCombos[0]}."
+            val comboLine = if (combos.size == 2)
+                "Combo one: ${combos[0]}. Combo two: ${combos[1]}."
+            else "Your combo: ${combos[0]}."
+            val callLine = if (combos.size == 2) " Throw the number I call." else " Throw it when I call one."
             val downLine = if (downMove.isNotEmpty()) " On \"$downWord\": $downMove." else ""
-            introText = (if (theme.say.isNotEmpty()) theme.say + " " else "") +
-                triggerLine + " Feint and jab to hold range in between." + downLine
-
-            val trig = if (renderedCombos.size == 2)
-                "One → ${renderedCombos[0]}   ·   Two → ${renderedCombos[1]}"
-            else "$goWord → ${renderedCombos[0]}"
-            val downLeg = if (downMove.isNotEmpty()) "   ·   $downWord → $downMove" else ""
-            legend = trig + downLeg
+            val openLine = if (st.allowOpen) " I'll mix in open calls too \u2014 listen out." else ""
+            introText = "${st.say} $comboLine$callLine$downLine$openLine"
         }
+
+        // ---- On-screen reference: one card per command (combos render vertically) ----
+        val refs = mutableListOf<CommandRef>()
+        if (!punchless) {
+            combos.forEachIndexed { i, c -> refs += CommandRef(comboLabel(i + 1), c) }
+            if (downMove.isNotEmpty()) refs += CommandRef(downWord.uppercase(), downMove)
+        }
+        val legend = refs.joinToString("   \u00b7   ") { "${it.label} \u2192 ${it.text}" }
+
         val cues = mutableListOf(Cue(0, introText, isIntro = true))
 
         // ---- Command stream ----
-        // Uses the FULL round (no 8s lead-in / 12s silent tail). Gaps scale with combo
-        // length — a long combo takes longer to throw, so it gets more space before the
-        // next call. Some rounds finish on a forced-intensity burst (built first, so the
-        // body knows where to stop).
-        val coachRatio = if (coaching) 0.10f else 0f
-        val downFloor = scale3(p.intensity, 0.08f, 0.10f, 0.16f)
-        val downPeak = scale3(p.intensity, 0.08f, 0.16f, 0.26f)
-        val downRatio = (downFloor + (downPeak - downFloor) * progress).coerceIn(0f, 0.4f)
-        val eDown = if (allowDown) downRatio else 0f
-        val attackBase = scale3(p.intensity, 6f, 5f, 4f)
-        fun attackGap(len: Int): Int =
-            (attackBase + len * 1.1f).roundToInt().coerceAtLeast(3) + rng.nextInt(-1, 2)
-        fun fillerGap(): Int =
-            scale3(p.intensity, 5f, 4f, 3f).roundToInt().coerceAtLeast(2) + rng.nextInt(0, 2)
+        // Between commands the boxer follows the STANDING instruction on his own, so the
+        // gaps are real (no filler cues). Commands are deliberately different from that
+        // default: numbered combos (burst-able \u2014 "one, one, one"), open-ended calls, and
+        // a conditioning down (also burst-able). Bursts can land anywhere in the round and
+        // vary in length \u2014 not just a fixed five at the end.
+        val startAt = 3
 
-        val startAt = 2
+        // Spacing WITHIN a burst \u2248 how long that combo takes to throw + a beat, so the
+        // calls don't leave an awkward pause between them.
+        fun throwTime(len: Int): Int = (1.2f + len * 0.55f).roundToInt().coerceIn(2, 5)
+        // Breathing gap BETWEEN events = standing-instruction time; shorter at high intensity.
+        fun breathGap(): Int = scale3(p.intensity, 9f, 7f, 5f).roundToInt().coerceAtLeast(3) + rng.nextInt(-1, 2)
 
-        // Optional end-of-round finisher (NOT pre-announced in the intro).
+        // Burst likelihood + length rise with intensity and how deep into the section we are.
+        val burstChance = (scale3(p.intensity, 0.15f, 0.30f, 0.45f) + progress * 0.15f).coerceIn(0f, 0.6f)
+        fun burstCount(maxN: Int): Int =
+            if (rng.nextFloat() < burstChance) rng.nextInt(2, maxN + 1) else 1
+
+        // Optional end finisher (NOT pre-announced). Sets hasFinisher so the engine keeps
+        // quiet over the last stretch and lets this own it.
         fun buildFinisher(): Pair<List<Cue>, Int> {
             if (punchless || durationSec < 60) return emptyList<Cue>() to 0
-            val chance = (scale3(p.intensity, 0.40f, 0.55f, 0.70f) + progress * 0.12f).coerceIn(0f, 0.8f)
+            val chance = (scale3(p.intensity, 0.35f, 0.50f, 0.65f) + progress * 0.12f).coerceIn(0f, 0.8f)
             if (rng.nextFloat() >= chance) return emptyList<Cue>() to 0
             val d = durationSec
             val out = mutableListOf<Cue>()
             if (rng.nextBoolean()) {
-                // (1) non-stop power shots into a 3-2-1
                 val reserve = 12
                 if (d - startAt < reserve + 20) return emptyList<Cue>() to 0
-                out += Cue(d - 11, "Last ten seconds — non-stop power shots!", isCommand = false)
-                out += Cue(d - 6, "Keep going, don't stop!", isCommand = false)
+                out += Cue(d - 11, "Last ten seconds \u2014 empty the tank!", isCommand = false)
                 out += Cue(d - 3, "3", isCommand = true)
                 out += Cue(d - 2, "2", isCommand = true)
                 out += Cue(d - 1, "1", isCommand = true)
                 return out to reserve
             } else {
-                // (2) N in a row — Go! Go! Go! — spaced by the round's combo length
-                val n = rng.nextInt(2, 6) // 2..5
-                val primaryLen = lens.firstOrNull() ?: 2
-                val spacing = (1.5f + primaryLen * 0.9f).roundToInt().coerceIn(2, 6)
-                val reserve = (2 + n * spacing + 1).coerceAtLeast(10)
+                val n = rng.nextInt(3, 6) // 3..5 in a row
+                val len = lens.firstOrNull() ?: 2
+                val sp = throwTime(len)
+                val reserve = (2 + n * sp + 1).coerceAtLeast(10)
                 if (d - startAt < reserve + 20) return emptyList<Cue>() to 0
-                var ft = d - reserve
-                out += Cue(ft, "$n in a row — get ready!", isCommand = false); ft += 2
-                repeat(n) { out += Cue(ft.coerceAtMost(d - 1), "Go!", isCommand = true); ft += spacing }
+                var ft = d - reserve + 2
+                out += Cue((ft - 2).coerceAtLeast(startAt), "$n in a row \u2014 let's go!", isCommand = false)
+                repeat(n) { out += Cue(ft.coerceAtMost(d - 1), comboSay(1), isCommand = true, comboIndex = 1); ft += sp }
                 return out to reserve
             }
         }
-        val (finisherCues, finisherReserve) = buildFinisher()
+        val (finisherCues, reserve) = buildFinisher()
         val hasFinisher = finisherCues.isNotEmpty()
-        val bodyEnd = durationSec - (if (hasFinisher) finisherReserve else 4)
+        val bodyEnd = durationSec - (if (hasFinisher) reserve else 3)
+
+        // Emit up to [count] copies of [text] spaced by [innerGap]; returns the last cue time.
+        fun burst(text: String, comboIdx: Int, count: Int, innerGap: Int, startT: Int): Int {
+            var tt = startT; var last = startT; var i = 0
+            while (i < count && tt < bodyEnd) {
+                cues += Cue(tt, text, isCommand = true, comboIndex = comboIdx)
+                last = tt; tt += innerGap; i++
+            }
+            return last
+        }
+
+        val coachRatio = if (coaching) 0.08f else 0f
+        val downRatio = if (allowDown) scale3(p.intensity, 0.10f, 0.14f, 0.20f) else 0f
+        val openRatio = if (st.allowOpen) 0.20f else 0f
 
         var t = startAt
-        var goToggle = false
         while (t < bodyEnd) {
-            val roll = rng.nextFloat()
-            var isCmd = true
-            var comboIdx = 0
-            val text: String
-            val gap: Int
             if (punchless) {
-                if (roll < coachRatio) {
-                    text = ComboLibrary.render(ComboLibrary.restTips.random(rng), stance); isCmd = false; gap = fillerGap() + 3
-                } else {
-                    text = ComboLibrary.render(theme.vocab!!.random(rng).first, stance); gap = fillerGap()
+                cues += Cue(t, ComboLibrary.render(st.vocab!!.random(rng).first, stance), isCommand = true)
+                t += breathGap()
+                continue
+            }
+            val roll = rng.nextFloat()
+            when {
+                roll < coachRatio -> {
+                    cues += Cue(t, ComboLibrary.render(ComboLibrary.restTips.random(rng), stance), isCommand = false)
+                    t += breathGap() + 2
                 }
-            } else {
-                when {
-                    roll < coachRatio -> {
-                        text = ComboLibrary.render(ComboLibrary.restTips.random(rng), stance); isCmd = false; gap = fillerGap() + 3
-                    }
-                    allowDown && roll < coachRatio + eDown -> {
-                        text = downWord; gap = attackGap(2) + 2
-                    }
-                    roll < coachRatio + eDown + 0.28f -> {
-                        text = ComboLibrary.render(ComboLibrary.spacingCues.random(rng), stance); gap = fillerGap()
-                    }
-                    else -> {
-                        if (renderedCombos.size == 2) {
-                            goToggle = !goToggle
-                            comboIdx = if (goToggle) 1 else 2
-                            text = if (goToggle) "One!" else "Two!"
-                            gap = attackGap(lens[comboIdx - 1])
-                        } else {
-                            text = goWord; gap = attackGap(lens.firstOrNull() ?: 2)
-                        }
-                    }
+                roll < coachRatio + downRatio -> {
+                    val last = burst("$downWord!", 0, burstCount(4), throwTime(2), t)
+                    t = last + breathGap()
+                }
+                roll < coachRatio + downRatio + openRatio -> {
+                    cues += Cue(t, ComboLibrary.render(ComboLibrary.openCommands.random(rng), stance), isCommand = true)
+                    t += breathGap()
+                }
+                else -> {
+                    val idx = if (combos.size == 2) rng.nextInt(1, 3) else 1
+                    val last = burst(comboSay(idx), idx, burstCount(if (progress > 0.5f) 5 else 4), throwTime(lens[idx - 1]), t)
+                    t = last + breathGap()
                 }
             }
-            cues += Cue(t, text, isCommand = isCmd, comboIndex = comboIdx)
-            t += gap.coerceAtLeast(2)
         }
         cues += finisherCues
 
-        val summaryHead = if (theme.label.isNotEmpty()) theme.label else "Tier $tier"
-        val summaryBody = if (punchless) "movement & defence" else renderedCombos.joinToString(" / ")
-        val summary = "$summaryHead · $summaryBody" +
-            (if (downMove.isNotEmpty()) " · $downWord: $downMove" else "") +
-            (if (hasFinisher) " · finisher" else "")
-        return Round(label, durationSec, cues, summary, legend = legend, combos = renderedCombos, hasFinisher = hasFinisher, standing = standing)
+        val summaryHead = st.label.ifEmpty { "Tier $tier" }
+        val summaryBody = if (punchless) "movement & defence" else combos.joinToString(" / ")
+        val summary = "$summaryHead \u00b7 $summaryBody" +
+            (if (downMove.isNotEmpty()) " \u00b7 $downWord: $downMove" else "") +
+            (if (hasFinisher) " \u00b7 finisher" else "")
+
+        return Round(
+            label, durationSec, cues, summary,
+            hasFinisher = hasFinisher, standing = st.label, standingHint = st.hint,
+            legend = legend, commandRefs = refs, combos = combos,
+        )
     }
 
-    // ---- Standing instructions (round themes) ----
-    // A theme governs the whole round. Simple themes allow up to 2 combos + a down-move;
-    // harder ones keep the live calls minimal. Most themes generate via the weight-aware
-    // ComboAssembler (`builder`); jab-only / double-jab-cross use a fixed `vocab`;
-    // movement-only is punchless and draws from `vocab`.
+    // ---- Standing instructions ----
+    // The standing instruction is what the boxer does UNPROMPTED, at his own pace, whenever
+    // no command is being called \u2014 a simple, sustainable default (shown persistently on the
+    // workout screen). The live COMMANDS are separate and deliberately different from it.
     private enum class Builder { FREE, LEAD, BODY, COUNTER, TWO, THREE }
 
-    private class Theme(
-        val say: String,
-        val label: String,
-        val maxCombos: Int,
-        val allowDown: Boolean,
-        val punchless: Boolean = false,
-        val builder: Builder? = null,
+    private class Standing(
+        val label: String,          // on-screen headline, e.g. "SINGLE JABS"
+        val hint: String,           // one-line detail under it
+        val say: String,            // spoken form for the intro
+        val builder: Builder?,      // how numbered combos are generated (null => fixed vocab / punchless)
         val vocab: List<Pair<String, Int>>? = null,
+        val punchless: Boolean = false,
+        val allowDown: Boolean = true,
+        val allowOpen: Boolean = true,
+        val maxCombos: Int = 2,
     )
 
     private val moveOnlyVocab = listOf(
         "Slip {L}" to 1, "Slip {R}" to 1, "Roll {L}" to 1, "Roll {R}" to 1, "Duck under" to 1,
         "Step back" to 1, "Step {L}" to 1, "Step {R}" to 1, "Pivot {L}" to 1, "Pivot {R}" to 1,
         "Circle {L}" to 1, "Circle {R}" to 1, "Block {L}" to 1, "Block {R}" to 1,
-        "Parry the jab" to 1, "Slip {L}, slip {R}" to 2, "Bob and weave" to 1,
+        "Parry the jab" to 1, "Bob and weave" to 1,
     )
 
-    /** Pick a standing instruction. Most rounds get one; harder themes are gated behind
-     *  higher complexity and (for movement/counter rounds) kept off the opening round. */
-    private fun pickTheme(index: Int, total: Int, complexity: Int, rng: Random): Theme {
+    /** Pick this round's standing instruction. Harder standings are gated behind higher
+     *  complexity, and the defensive/movement ones are kept off the opening round. */
+    private fun pickStanding(index: Int, total: Int, complexity: Int, rng: Random): Standing {
         val hard = complexity >= 4
         val notFirst = index > 0
-        val pool = mutableListOf<Pair<Theme, Int>>()
-        pool += Theme("", "", 2, true, builder = Builder.FREE) to 3
-        pool += Theme("Any two-punch combos this round — sharp and clean.", "2-PUNCH", 2, true, builder = Builder.TWO) to 3
-        pool += Theme("Single jabs only. Vary the speed, level and rhythm.", "JAB ONLY", 1, false, vocab = listOf("Jab" to 1)) to 2
-        pool += Theme("Double jab, then cross — same combo every rep. Sharpen it.", "DOUBLE JAB–CROSS", 1, true, vocab = listOf("Double jab, cross" to 3)) to 2
-        pool += Theme("Lead hand only — jabs, hooks and uppercuts off the lead.", "LEAD HAND ONLY", 2, true, builder = Builder.LEAD) to 2
-        pool += Theme("Body shots only. Bend the knees and dig in.", "BODY ONLY", 2, true, builder = Builder.BODY) to 2
+        val pool = mutableListOf<Pair<Standing, Int>>()
+        pool += Standing("MIX IT UP", "your combinations \u2014 keep them varied",
+            "Standing instruction: keep light combinations going, your own choice.", Builder.FREE) to 3
+        pool += Standing("SINGLE JABS", "vary the height, speed and count",
+            "Standing instruction: single jabs \u2014 vary the height, speed and count on your own.", Builder.FREE) to 3
+        pool += Standing("STICK & MOVE", "jab and circle, hold the range",
+            "Standing instruction: stick and move \u2014 jab and circle, hold your range.", Builder.FREE) to 2
+        pool += Standing("ONE-TWOS", "sharp, straight one-twos",
+            "Standing instruction: steady one-twos \u2014 sharp and straight.", Builder.TWO) to 2
+        pool += Standing("DOUBLE JAB\u2013CROSS", "double jab into the cross",
+            "Standing instruction: double jab into the cross, over and over.",
+            null, vocab = listOf("Double jab, cross" to 3), maxCombos = 1) to 2
+        pool += Standing("LEAD HAND", "lead-hand shots only",
+            "Standing instruction: work the lead hand \u2014 jab and lead hook.",
+            Builder.LEAD, allowOpen = false) to 2
         if (hard) {
-            pool += Theme("Any three-punch combos — flow them together.", "3-PUNCH", 2, true, builder = Builder.THREE) to 3
-            if (notFirst) pool += Theme("Counter work — slip or roll first, then fire back.", "COUNTERS", 1, false, builder = Builder.COUNTER) to 2
-            if (notFirst) pool += Theme("No punches — movement and defence only. Slips, rolls, pivots, footwork.", "MOVEMENT ONLY", 1, false, punchless = true, vocab = moveOnlyVocab) to 2
+            pool += Standing("FLOW THREES", "three-punch combinations",
+                "Standing instruction: flowing three-punch combinations.", Builder.THREE) to 2
+            if (notFirst) pool += Standing("SLIP & COUNTER", "slip or roll, then fire back",
+                "Standing instruction: stay on defence \u2014 slip or roll, then fire straight back.",
+                Builder.COUNTER, allowDown = false, allowOpen = false, maxCombos = 1) to 2
+            if (notFirst) pool += Standing("KEEP MOVING", "slips, rolls, pivots, footwork",
+                "Standing instruction: pure movement \u2014 slips, rolls, pivots and footwork.",
+                null, vocab = moveOnlyVocab, punchless = true, allowDown = false, allowOpen = false) to 2
         }
         val totalW = pool.sumOf { it.second }
         var r = rng.nextInt(totalW)
-        for ((th, w) in pool) { if (r < w) return th; r -= w }
+        for ((sd, w) in pool) { if (r < w) return sd; r -= w }
         return pool.first().first
     }
 
