@@ -243,9 +243,10 @@ object RoutineGenerator {
     ): Section {
         val rest = (p.restSec + scale3(p.intensity, 15f, 0f, -15f)).roundToInt().coerceAtLeast(30)
         val modes = modeSequence(roundCount, p.complexity, rng)
+        val ladder = Ladder()   // #4: fragments introduced by ASSIGNED rounds accumulate here for fusion
         val rounds = mutableListOf<Round>()
         for (i in 0 until roundCount) {
-            rounds += workRound(type, i, roundCount, roundSec, p, stance, rng, coaching, modes.getOrNull(i))
+            rounds += workRound(type, i, roundCount, roundSec, p, stance, rng, coaching, modes.getOrNull(i), ladder)
             if (i < roundCount - 1) rounds += Round(
                 "Rest", rest, emptyList(), "Rest — ${rest}s", isRest = true
             )
@@ -264,6 +265,10 @@ object RoutineGenerator {
 
     // ---- Modes ----------------------------------------------------------------
     private enum class Mode { ASSIGNED, RANGE, FREESTYLE }
+
+    /** #4 Per-section accumulator: base fragments introduced by ASSIGNED rounds, oldest first,
+     *  drawn on to build fused (laddered) combos in later rounds. */
+    private class Ladder(val frags: MutableList<ComboAssembler.Fragment> = mutableListOf())
 
     /** A whole-section sequence of modes: ASSIGNED weighted highest, RANGE next, FREESTYLE
      *  gated off the opening round and rising with complexity + how deep we are; no two
@@ -337,7 +342,7 @@ object RoutineGenerator {
     private fun workRound(
         type: SectionType, index: Int, total: Int, durationSec: Int,
         p: RoutineParams, stance: Stance, rng: Random, coaching: Boolean = true,
-        mode0: Mode? = null,
+        mode0: Mode? = null, ladder: Ladder? = null,
     ): Round {
         val progress = if (total <= 1) 1f else index.toFloat() / (total - 1)
         val mode = mode0 ?: pickMode(index, total, p.complexity, rng)
@@ -347,6 +352,8 @@ object RoutineGenerator {
         val base = scale3(p.complexity, 1f, 1f, 2f).coerceIn(1f, ceiling.toFloat())
         val tier = (base + progress * (ceiling - base)).toInt().coerceIn(1, ceiling)
         val targetScore = 1.5 + tier * 1.9
+        // #3 compound atoms are advanced — only late in a session at high complexity.
+        val compoundOk = p.complexity >= 5 && progress > 0.3f
 
         val label = "${sectionNoun(type)} \u2014 Round ${index + 1} of $total"
         val downWord = downWords.random(rng)
@@ -374,35 +381,36 @@ object RoutineGenerator {
 
         when (mode) {
             Mode.ASSIGNED -> {
-                val twoFloor = scale3(p.complexity, 0f, 0f, 0.15f).coerceAtLeast(0f)
-                val twoPeak = scale3(p.complexity, 0f, 0.40f, 0.60f).coerceIn(0f, 0.75f)
-                val twoChance = (twoFloor + (twoPeak - twoFloor) * progress).coerceIn(0f, 0.75f)
-                val comboCount = if (rng.nextFloat() < twoChance) 2 else 1
+                // #4 Fragment ladder: each ASSIGNED round introduces a fresh base fragment; once a
+                // couple exist and we're far enough in, the round's combo is a FUSION of the last few
+                // (built from earlier ones), so complexity compounds across the section. A wider
+                // window comes later. With no ladder (single-round regen) it's just a base fragment.
+                val newFrag = ComboAssembler.fragment(targetScore, stance, rng, compoundOk)
+                val priorCount = ladder?.frags?.size ?: 0
+                val combo: String
+                val len: Int
+                var built = false
+                if (ladder != null && priorCount >= 2 && progress > 0.25f) {
+                    val fuseK = (2 + (progress * 2f).toInt()).coerceIn(2, minOf(4, priorCount + 1))
+                    val chosen = (ladder.frags + newFrag).takeLast(fuseK)
+                    val fused = ComboAssembler.fuse(chosen, stance, rng)
+                    if (fused.text.isNotBlank()) { combo = fused.text; len = fused.actionCount; built = true }
+                    else { combo = newFrag.text; len = newFrag.actionCount }
+                } else { combo = newFrag.text; len = newFrag.actionCount }
+                ladder?.frags?.add(newFrag)
 
-                val assigned = mutableListOf<Pair<String, Int>>()
-                var guard = 0
-                while (assigned.size < comboCount && guard < 30) {
-                    val c = ComboAssembler.inside(targetScore, stance, rng)
-                    if (assigned.none { it.first == c.text }) assigned += c.text to c.actionCount
-                    guard++
-                }
-                if (assigned.isEmpty()) { val c = ComboAssembler.inside(targetScore, stance, rng); assigned += c.text to c.actionCount }
-
-                combos = assigned.map { it.first }
-                lens = assigned.map { it.second }
+                combos = listOf(combo)
+                lens = listOf(len)
                 standing = "ON MY CALL"
-                hint = "throw the number I call \u2014 stay busy between"
-                combos.forEachIndexed { i, c -> refs += CommandRef(comboLabel(i + 1), c) }
+                hint = "throw the combo I call \u2014 stay busy between"
+                refs += CommandRef(comboLabel(1), combo)
                 refs += CommandRef(downWord.uppercase(), downMove)
 
-                val comboLine = if (combos.size == 2)
-                    "Combo one: ${combos[0]}. Combo two: ${combos[1]}. Throw the number I call."
-                else "Your combo: ${combos[0]}. Throw it when I call one."
-                introText = "Assigned combos. $comboLine On \"$downWord\": $downMove."
+                val lead = if (built) "Built combo \u2014 this fuses what you've drilled: " else "Your combo: "
+                introText = "Assigned combo. $lead$combo. Throw it when I call one. On \"$downWord\": $downMove."
 
                 fireCombo = { cues, t, bodyEnd ->
-                    val idx = if (combos.size == 2) rng.nextInt(1, 3) else 1
-                    val last = burst(cues, comboSay(idx), idx, burstCount(if (progress > 0.5f) 5 else 4), throwTime(lens[idx - 1]), t, bodyEnd)
+                    val last = burst(cues, comboSay(1), 1, burstCount(if (progress > 0.5f) 5 else 4), throwTime(lens[0]), t, bodyEnd)
                     last + breathGap(p, rng)
                 }
                 finisherBurst = Triple(comboSay(1), 1, lens[0])
@@ -410,7 +418,7 @@ object RoutineGenerator {
 
             Mode.RANGE -> {
                 val rangeComboTarget = (3.2 + progress * 1.2)   // short inside combo (~2–3 punches)
-                val c = ComboAssembler.inside(rangeComboTarget, stance, rng)
+                val c = ComboAssembler.inside(rangeComboTarget, stance, rng, compoundOk)
                 combos = listOf(c.text)
                 lens = listOf(c.actionCount)
                 standing = "HOLD RANGE"
@@ -435,7 +443,7 @@ object RoutineGenerator {
 
             Mode.FREESTYLE -> {
                 val theme = pickTheme(p.complexity, index, rng)
-                val c = ComboAssembler.inside(targetScore, stance, rng)
+                val c = ComboAssembler.inside(targetScore, stance, rng, compoundOk)
                 combos = listOf(c.text)
                 lens = listOf(c.actionCount)
                 standing = theme.label
