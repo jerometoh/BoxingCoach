@@ -105,6 +105,7 @@ object ComboAssembler {
         val levelOnly: PLevel? = null,
         val rangeOnly: PRange? = null,
         val exactPunches: Int? = null,
+        val maxPunches: Int? = null,       // #1 hard cap on throws (fragments)
         val insideEntry: Boolean = false,
         val startDefensive: Boolean = false,
         val jabCap: Int = 99,
@@ -144,7 +145,7 @@ object ComboAssembler {
 
     /** #4 A short inside fragment that ends on a re-angle step so it chains into the next. */
     fun fragment(target: Double, stance: Stance, rng: Random, compounds: Boolean = false): Fragment {
-        val r = assemble(Opts(target = target, insideEntry = true, rangeOnly = PRange.INSIDE, compounds = compounds, fragmentEnding = true), rng)
+        val r = assemble(Opts(target = target, insideEntry = true, rangeOnly = PRange.INSIDE, compounds = compounds, fragmentEnding = true, maxPunches = 5), rng)
         return Fragment(r.acts, render(r.acts, stance), r.acts.size, r.score)
     }
 
@@ -153,25 +154,24 @@ object ComboAssembler {
      *  dropped so the fused combo lands on a power shot. */
     fun fuse(frags: List<Fragment>, stance: Stance, rng: Random): Combo {
         if (frags.isEmpty()) return Combo("", 0, 0.0)
-        if (frags.size == 1) return Combo(frags[0].text, frags[0].actionCount, frags[0].score)
+        val maxActions = 15                                   // #1 cap the fused combo length
         val out = ArrayList<SA>()
         var cur = Bal.N
-        frags.forEachIndexed { fi, fr ->
-            var acts = fr.acts
-            if (fi == frags.size - 1) {                       // final fragment: drop its re-angle tail
-                val last = acts.lastOrNull()
-                if (last != null && !last.isThrow && last.say in REANGLE_STEPS) acts = acts.dropLast(1)
-                // if that leaves a bare jab ending, disengage with a pivot instead
-                val lastThrow = acts.lastOrNull { it.isThrow }
-                if (lastThrow != null && !lastThrow.isCompound && (SAY_TO_PUNCH[lastThrow.say]?.isJab() == true))
-                    acts = acts + SA(EXITS[1 + rng.nextInt(2)], false, false)   // pivot {L}/{R}
-            }
-            if (fi > 0) {                                     // join: bridge if the running weight can't start this fragment
+        for (fr in frags) {
+            val acts = fr.acts
+            // stop before we blow the cap (+1 for a possible join bridge); always include the first
+            if (out.isNotEmpty() && out.size + acts.size + 1 > maxActions) break
+            if (out.isNotEmpty()) {                           // join: bridge if the weight can't start this fragment
                 val need = firstNeed(acts)
                 if (cur !in need) { val (bsay, bl) = bridge(cur, need, null, rng); out.add(SA(bsay, false, false)); cur = bl }
             }
             for (a in acts) { out.add(a); cur = weightAfter(a, cur) }
         }
+        // ending: drop the last fragment's trailing re-angle so it lands on power; no bare-jab finish
+        if (out.isNotEmpty() && !out.last().isThrow && out.last().say in REANGLE_STEPS) out.removeAt(out.size - 1)
+        val lastThrow = out.lastOrNull { it.isThrow }
+        if (lastThrow != null && !lastThrow.isCompound && SAY_TO_PUNCH[lastThrow.say]?.isJab() == true)
+            out.add(SA(EXITS[1 + rng.nextInt(2)], false, false))
         val score = out.count { it.isThrow } + 1.5 * out.count { !it.isThrow }
         return Combo(render(out, stance), out.size, score)
     }
@@ -213,7 +213,9 @@ object ComboAssembler {
     }
 
     private fun sameHandVaried(prev: Punch?, p: Punch) =
-        prev != null && p.hand == prev.hand && (p.level != prev.level || p.shape != prev.shape)
+        prev != null && p.hand == prev.hand &&
+            prev.shape != PShape.STR && p.shape != PShape.STR &&   // #3 hooks/uppercuts only — never two straights
+            (p.level != prev.level || p.shape != prev.shape)
 
     private fun pickPunch(
         pool: List<Punch>, prev: Punch?, levelFree: Boolean, jabRun: Int, jabCap: Int,
@@ -231,7 +233,7 @@ object ComboAssembler {
                 if (p.level == PLevel.BODY && levelFree) w *= 0.5
             } else {
                 w *= when {
-                    p.hand == prev.hand && (p.level != prev.level || p.shape != prev.shape) -> 0.9 // #2 varied same-hand: idiomatic
+                    sameHandVaried(prev, p) -> 0.9    // #2/#3 varied same-hand (hook/upp): idiomatic, thrown direct
                     p.hand == prev.hand -> 0.4
                     else -> 1.2
                 }
@@ -323,11 +325,13 @@ object ComboAssembler {
             guard++
             val effLen = punchSeq.size + compoundCount
             if (opts.exactPunches != null && effLen >= opts.exactPunches) break
+            if (opts.maxPunches != null && effLen >= opts.maxPunches) break   // #1 fragment length cap
             if (opts.exactPunches == null && effLen >= 2 &&
                 scoreOf(punchSeq, acts.count { !it.isThrow }, compoundCount) >= opts.target) break
 
-            // #3 occasionally throw a compound (advanced; inside/free only)
-            if (opts.compounds && insideish && effLen >= 1 && rng.nextDouble() < 0.18) {
+            // #3 occasionally throw a compound (advanced; inside/free only; never two in a row)
+            if (opts.compounds && insideish && effLen >= 1 && acts.lastOrNull()?.isCompound != true &&
+                rng.nextDouble() < 0.18) {
                 addCompound(COMPOUNDS.random(rng)); continue
             }
 

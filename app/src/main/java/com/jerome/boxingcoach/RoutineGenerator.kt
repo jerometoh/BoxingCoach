@@ -268,7 +268,10 @@ object RoutineGenerator {
 
     /** #4 Per-section accumulator: base fragments introduced by ASSIGNED rounds, oldest first,
      *  drawn on to build fused (laddered) combos in later rounds. */
-    private class Ladder(val frags: MutableList<ComboAssembler.Fragment> = mutableListOf())
+    private class Ladder(
+        val frags: MutableList<ComboAssembler.Fragment> = mutableListOf(),
+        var fusedCount: Int = 0,   // advances each fused round so the window rotates
+    )
 
     /** A whole-section sequence of modes: ASSIGNED weighted highest, RANGE next, FREESTYLE
      *  gated off the opening round and rising with complexity + how deep we are; no two
@@ -387,17 +390,22 @@ object RoutineGenerator {
                 // window comes later. With no ladder (single-round regen) it's just a base fragment.
                 val newFrag = ComboAssembler.fragment(targetScore, stance, rng, compoundOk)
                 val priorCount = ladder?.frags?.size ?: 0
+                ladder?.frags?.add(newFrag)
                 val combo: String
                 val len: Int
                 var built = false
                 if (ladder != null && priorCount >= 2 && progress > 0.25f) {
-                    val fuseK = (2 + (progress * 2f).toInt()).coerceIn(2, minOf(4, priorCount + 1))
-                    val chosen = (ladder.frags + newFrag).takeLast(fuseK)
+                    // fuse a ROTATING window of the accumulated fragments so later rounds don't keep
+                    // rebuilding the same ones; the 15-action cap in fuse() keeps the result sane.
+                    val avail = ladder.frags
+                    val fuseK = (2 + (progress * 2f).toInt()).coerceIn(2, minOf(3, avail.size))
+                    val start = ladder.fusedCount % avail.size
+                    val chosen = (0 until fuseK).map { avail[(start + it) % avail.size] }
+                    ladder.fusedCount++
                     val fused = ComboAssembler.fuse(chosen, stance, rng)
                     if (fused.text.isNotBlank()) { combo = fused.text; len = fused.actionCount; built = true }
                     else { combo = newFrag.text; len = newFrag.actionCount }
                 } else { combo = newFrag.text; len = newFrag.actionCount }
-                ladder?.frags?.add(newFrag)
 
                 combos = listOf(combo)
                 lens = listOf(len)
