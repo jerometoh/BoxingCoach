@@ -180,13 +180,17 @@ object RoutineGenerator {
         val names = mutableListOf<String>()
         steps += GuidedStep("Core circuit — ${moves.size} exercises. Brace and breathe.")
         moves.forEachIndexed { i, m ->
-            val name = ComboLibrary.render(m, stance)
+            val name = ComboLibrary.render(m.text, stance)
             names += name
             val lead = if (i == moves.size - 1) "Last one" else if (i == 0) "First" else "Next"
+            // No "Go" here — the engine speaks a get-into-position countdown before each
+            // core exercise, which is also the switch-over time between them.
+            val detail = if (m.perSide) "$holdEach seconds each side" else "$holdEach seconds"
             steps += GuidedStep(
-                announce = "$lead: $name. $holdEach seconds. Go.",
+                announce = "$lead: $name. $detail.",
                 name = name,
                 holdSec = holdEach,
+                perSide = m.perSide,
             )
         }
         steps += GuidedStep("Core done. Nice work.")
@@ -247,9 +251,13 @@ object RoutineGenerator {
         val rounds = mutableListOf<Round>()
         for (i in 0 until roundCount) {
             rounds += workRound(type, i, roundCount, roundSec, p, stance, rng, coaching, modes.getOrNull(i), ladder)
-            if (i < roundCount - 1) rounds += Round(
-                "Rest", rest, emptyList(), "Rest — ${rest}s", isRest = true
-            )
+            if (i < roundCount - 1) {
+                // Hydration belongs in the rest, not mid-round. Drop a water reminder into
+                // some rests (a few seconds in, clear of the next-round intro).
+                val restCues = if (rest >= 25 && rng.nextFloat() < 0.5f)
+                    listOf(Cue(4, "Grab some water.", isCommand = false)) else emptyList()
+                rounds += Round("Rest", rest, restCues, "Rest — ${rest}s", isRest = true)
+            }
         }
         return Section(type, title, rounds)
     }
@@ -360,7 +368,8 @@ object RoutineGenerator {
 
         val label = "${sectionNoun(type)} \u2014 Round ${index + 1} of $total"
         val downWord = downWords.random(rng)
-        val downMove = ComboLibrary.render(ComboLibrary.downMoves.random(rng), stance)
+        val down = ComboLibrary.downMoves.random(rng)
+        val downMove = ComboLibrary.render(down.text, stance)
 
         // Burst helper (mutates the given cue list); capped at bodyEnd (set below).
         fun burstCount(maxN: Int): Int {
@@ -516,22 +525,38 @@ object RoutineGenerator {
         val downRatio = scale3(p.intensity, 0.10f, 0.14f, 0.20f)
 
         var t = startAt
+        var lastWasDown = false          // never two downs in a row
+        var holdDownUsed = false         // a "hold until Up" down fires at most once per round
         while (t < bodyEnd) {
             val roll = rng.nextFloat()
+            val canDown = !lastWasDown && (!down.hold || !holdDownUsed)
             when {
                 roll < coachRatio -> {
                     cues += Cue(t, ComboLibrary.render(ComboLibrary.restTips.random(rng), stance), isCommand = false)
                     t += breathGap(p, rng) + 2
+                    lastWasDown = false
                 }
-                roll < coachRatio + downRatio -> {
-                    val last = burst(cues, "$downWord!", 0, burstCount(4), throwTime(2), t, bodyEnd)
-                    t = last + breathGap(p, rng)
+                canDown && roll < coachRatio + downRatio -> {
+                    if (down.hold) {
+                        // Held move: drop on "Down!", hold, then release on "Up!" — the paired
+                        // release the old code never gave.
+                        cues += Cue(t, "$downWord!", isCommand = true)
+                        val up = (t + down.holdSec).coerceAtMost(bodyEnd - 1)
+                        cues += Cue(up, "Up!", isCommand = true)
+                        t = up + breathGap(p, rng)
+                        holdDownUsed = true
+                    } else {
+                        val last = burst(cues, "$downWord!", 0, burstCount(4), throwTime(2), t, bodyEnd)
+                        t = last + breathGap(p, rng)
+                    }
+                    lastWasDown = true
                 }
                 openCall != null && roll < coachRatio + downRatio + openRatio -> {
                     cues += Cue(t, openCall!!(), isCommand = true)   // pre-rendered / token-free text
                     t += breathGap(p, rng)
+                    lastWasDown = false
                 }
-                else -> t = fireCombo(cues, t, bodyEnd)
+                else -> { t = fireCombo(cues, t, bodyEnd); lastWasDown = false }
             }
         }
         cues += finisherCues

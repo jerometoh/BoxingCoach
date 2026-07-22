@@ -146,14 +146,14 @@ class TtsManager(context: Context) : SpeechEngine {
         // Rate is snapshotted by the engine at speak() time, so setting it right
         // before queuing applies to this utterance only.
         tts.setSpeechRate(BASE_RATE * rateScale)
-        // On a FRESH duck the music-volume fade + audio-stream warm-up swallows the first
-        // ~150 ms, clipping the onset of a short command ("Go!" -> "Oh!"). Queue a brief
-        // silence first so the path settles before the real phoneme. Not needed while the
-        // duck is already held (music down, stream warm), so bursts stay tight.
-        if (newlyDucked) {
-            pending.incrementAndGet()
-            tts.playSilentUtterance(200L, TextToSpeech.QUEUE_ADD, "warm-${System.nanoTime()}")
-        }
+        // Onset headroom: queue a brief silence before the real phoneme so the audio path —
+        // and, on a fresh duck, the music-volume fade — doesn't swallow the start of a short
+        // command ("Down!" -> "own"). Longer on a fresh duck (fade + stream warm), short
+        // otherwise so bursts stay tight; the small always-on pad is what fixes clipping that
+        // still happened after the grace period released the duck between commands.
+        val warmMs = if (newlyDucked) 300L else 90L
+        pending.incrementAndGet()
+        tts.playSilentUtterance(warmMs, TextToSpeech.QUEUE_ADD, "warm-${System.nanoTime()}")
         pending.incrementAndGet()
         tts.speak(text, TextToSpeech.QUEUE_ADD, null, "cue-${System.nanoTime()}")
     }

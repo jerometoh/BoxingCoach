@@ -219,8 +219,21 @@ object ComboAssembler {
 
     private fun pickPunch(
         pool: List<Punch>, prev: Punch?, levelFree: Boolean, jabRun: Int, jabCap: Int,
-        seqNums: List<Int>, attract: Boolean, rng: Random,
+        seqNums: List<Int>, attract: Boolean, history: List<Punch>, rng: Random,
     ): Punch {
+        // #4 shape balance: nudge toward a target straight/hook/uppercut mix so crosses aren't
+        // swamped by the many hook/uppercut variants. Measured over INSIDE-range shots only, so
+        // the LONG entry jab doesn't count as a "straight" and suppress the cross right after it.
+        val inHist = history.filter { it.range == PRange.INSIDE }
+        // break a run of the same shape (e.g. hook, hook, → third hook) so combos don't pile up
+        val last2 = inHist.takeLast(2)
+        val chainShape = if (last2.size == 2 && last2[0].shape == last2[1].shape) last2[0].shape else null
+        fun shapeBalance(p: Punch): Double {
+            if (inHist.isEmpty()) return 1.0
+            val frac = inHist.count { it.shape == p.shape }.toFloat() / inHist.size
+            val target = when (p.shape) { PShape.STR -> 0.34f; PShape.HOOK -> 0.40f; PShape.UPP -> 0.26f }
+            return (1f + 3.0f * (target - frac)).coerceIn(0.30f, 2.6f).toDouble()
+        }
         val out = ArrayList<Pair<Punch, Double>>()
         for (p in pool) {
             if (p.isJab() && jabRun >= jabCap) continue
@@ -245,6 +258,10 @@ object ComboAssembler {
             if (attract) {                                     // #1 boost a canonical continuation
                 val n = seqNums.size
                 if (CLASSICS.any { it.size > n && it.subList(0, n) == seqNums && it[n] == p.num }) w *= 2.6
+            }
+            if (prev != null) {
+                w *= shapeBalance(p)                          // #4 keep the straight/hook/upp mix honest
+                if (chainShape != null && p.shape == chainShape) w *= 0.4   // no 3rd-in-a-row same shape
             }
             out.add(p to w)
         }
@@ -335,7 +352,7 @@ object ComboAssembler {
                 addCompound(COMPOUNDS.random(rng)); continue
             }
 
-            var p = pickPunch(pool, prev, levelFree, jabRun, opts.jabCap, seqNums, opts.attract, rng)
+            var p = pickPunch(pool, prev, levelFree, jabRun, opts.jabCap, seqNums, opts.attract, punchSeq, rng)
             if (cur !in p.needs) {
                 if (sameHandVaried(prev, p)) {
                     // #2 sanctioned same-hand varied double — re-loads within the pair, no bridge

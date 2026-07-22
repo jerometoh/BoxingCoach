@@ -105,13 +105,17 @@ object ComboLibrary {
     )
 
     // ---- Conditioning moves assigned per-round (announced in the intro; triggered by the round's down-word) ----
+    // hold = a held position released by a spoken "Up!"; others are quick self-contained reps
+    // the boxer pops straight back up from.
+    data class DownMove(val text: String, val hold: Boolean = false, val holdSec: Int = 12)
     val downMoves = listOf(
-        "two squats",
-        "four mountain climbers",
-        "one burpee",
-        "a squat hold until I call you back up",
-        "five fast punches from the floor",
-        "one sprawl",
+        DownMove("two squats"),
+        DownMove("four mountain climbers"),
+        DownMove("one burpee"),
+        DownMove("five push-ups"),
+        DownMove("one sprawl"),
+        DownMove("three squat thrusts"),
+        DownMove("a squat hold until I call you back up", hold = true, holdSec = 12),
     )
 
     // ---- Spacing/filler cues used between "Go" commands — short, not full combos ----
@@ -169,18 +173,18 @@ object ComboLibrary {
         WarmupMove("Light bounce on the toes — find your rhythm", MoveKind.HOLD, holdSec = 20),
     )
 
-    // ---- Core exercises ----
+    // ---- Core exercises ---- (perSide => the engine holds one side, "Switch sides.", then the other)
+    data class CoreMove(val text: String, val perSide: Boolean = false)
     val coreMoves = listOf(
-        "Plank hold",
-        "Bicycle crunches",
-        "Russian twists",
-        "Leg raises",
-        "Mountain climbers",
-        "Side plank, {L} side",
-        "Side plank, {R} side",
-        "Sit-up with a cross at the top",
-        "Hollow body hold",
-        "Flutter kicks",
+        CoreMove("Plank hold"),
+        CoreMove("Bicycle crunches"),
+        CoreMove("Russian twists"),
+        CoreMove("Leg raises"),
+        CoreMove("Mountain climbers"),
+        CoreMove("Side plank", perSide = true),
+        CoreMove("Sit-up with a cross at the top"),
+        CoreMove("Hollow body hold"),
+        CoreMove("Flutter kicks"),
     )
 
     // ---- Cool-down ----
@@ -200,7 +204,6 @@ object ComboLibrary {
         "Breathe. In through the nose, out through the mouth.",
         "Hands up when you're tired — that's when it counts.",
         "Shake the arms out. Stay loose.",
-        "Sip water if you need it.",
         "Next round, sit down on your punches.",
         "Snap the jab back as fast as it goes out.",
         "Exhale sharply on every punch.",

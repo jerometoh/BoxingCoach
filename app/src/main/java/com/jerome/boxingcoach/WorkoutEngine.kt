@@ -419,6 +419,10 @@ object WorkoutEngine {
             tts?.speak(step.announce, INTRO_RATE)
             awaitSpeech()
 
+            // Core: give time to get set / switch positions between exercises — a spoken
+            // "get into position … 5,4,3,2,1 … go" before the exercise starts.
+            if (section.type == SectionType.CORE) elapsed = prepCountdown(elapsed)
+
             when {
                 // Counted reps (optionally per side with a "Switch").
                 step.reps > 0 -> {
@@ -494,6 +498,23 @@ object WorkoutEngine {
             delay(1000); elapsed++
             _state.value = _state.value.copy(secondsLeft = remaining - 1, elapsedTotal = elapsed)
         }
+        return elapsed
+    }
+
+    /** Spoken "get into position … 5,4,3,2,1 … go" before a core exercise, giving time to
+     *  set up or switch positions. Drives the on-screen countdown; skippable and pausable. */
+    private suspend fun prepCountdown(startElapsed: Int, seconds: Int = 5): Int {
+        var elapsed = startElapsed
+        tts?.speak("Get into position."); awaitSpeech()
+        for (n in seconds downTo 1) {
+            if (skipFlag) return elapsed
+            while (_state.value.phase == WorkoutPhase.PAUSED) delay(200)
+            tts?.speak("$n")
+            _state.value = _state.value.copy(secondsLeft = n, timed = true)
+            delay(1000); elapsed++
+            _state.value = _state.value.copy(elapsedTotal = elapsed)
+        }
+        tts?.speak("Go.")
         return elapsed
     }
 
