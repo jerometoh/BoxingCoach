@@ -87,6 +87,11 @@ object ComboAssembler {
         Triple("roll {L} into the {L} uppercut", ANY, Bal.R),
         Triple("roll {R} into the {R} uppercut", ANY, Bal.L),
     )
+    private val COMPOUND_L = COMPOUNDS.first { it.first.contains("{L}") }  // roll left → LEAD uppercut (resets from REAR)
+    private val COMPOUND_R = COMPOUNDS.first { it.first.contains("{R}") }  // roll right → REAR uppercut (resets from LEAD)
+    // The punch a compound represents, so identical-repeat / oscillation / balance see it (rules D/E).
+    private fun compoundPunch(say: String) =
+        if (say.contains("{L}")) SAY_TO_PUNCH.getValue("{L} uppercut") else SAY_TO_PUNCH.getValue("{R} uppercut")
     private val COMPOUND_SAYS = COMPOUNDS.map { it.first }.toSet()
     private val COMPOUND_LEAVES = COMPOUNDS.associate { it.first to it.third }
     // #3 disengaging compound exits (terminal): defensive angle + a parting jab.
@@ -157,8 +162,10 @@ object ComboAssembler {
         val maxActions = 15                                   // #1 cap the fused combo length
         val out = ArrayList<SA>()
         var cur = Bal.N
-        for (fr in frags) {
-            val acts = fr.acts
+        for ((fi, fr) in frags.withIndex()) {
+            // (F) feint is opener-only: a non-first fragment must not lead with a feint mid-combo
+            var acts = fr.acts
+            if (fi > 0 && acts.firstOrNull()?.let { !it.isThrow && it.say == "feint" } == true) acts = acts.drop(1)
             // stop before we blow the cap (+1 for a possible join bridge); always include the first
             if (out.isNotEmpty() && out.size + acts.size + 1 > maxActions) break
             if (out.isNotEmpty()) {                           // join: bridge if the weight can't start this fragment
@@ -198,7 +205,7 @@ object ComboAssembler {
 
     // ---- core ----
     private fun scoreOf(punches: List<Punch>, defMove: Int, compoundCount: Int): Double {
-        var s = punches.size + 1.5 * defMove + 1.5 * compoundCount
+        var s = punches.size + 1.5 * defMove + 0.5 * compoundCount   // compound's punch is already in `punches`
         for (i in 1 until punches.size) {
             if (punches[i].level != punches[i - 1].level) s += 1.0
             if (punches[i].hand == punches[i - 1].hand) s += 0.5
@@ -219,13 +226,9 @@ object ComboAssembler {
 
     private fun pickPunch(
         pool: List<Punch>, prev: Punch?, levelFree: Boolean, jabRun: Int, jabCap: Int,
-        seqNums: List<Int>, attract: Boolean, history: List<Punch>, rng: Random,
+        seqNums: List<Int>, attract: Boolean, history: List<Punch>, cur: Bal, afterStraightBody: Boolean, rng: Random,
     ): Punch {
-        // #4 shape balance: nudge toward a target straight/hook/uppercut mix so crosses aren't
-        // swamped by the many hook/uppercut variants. Measured over INSIDE-range shots only, so
-        // the LONG entry jab doesn't count as a "straight" and suppress the cross right after it.
         val inHist = history.filter { it.range == PRange.INSIDE }
-        // break a run of the same shape (e.g. hook, hook, → third hook) so combos don't pile up
         val last2 = inHist.takeLast(2)
         val chainShape = if (last2.size == 2 && last2[0].shape == last2[1].shape) last2[0].shape else null
         fun shapeBalance(p: Punch): Double {
@@ -238,8 +241,18 @@ object ComboAssembler {
         for (p in pool) {
             if (p.isJab() && jabRun >= jabCap) continue
             if (prev != null && prev.isStraightBody() && p.isStraightBody()) continue
-            // #2 ban a consecutive IDENTICAL punch (same number & level) unless it's the jab
+            // #2/#E ban a consecutive IDENTICAL punch (same number & level), jab excepted. prev
+            // persists across bridges AND compounds, so a reset never licenses the same shot again.
             if (prev != null && p.num == prev.num && p.level == prev.level && !p.isJab()) continue
+            // (B) after a straight body shot you're bent low: no bridge is allowed, so only offer a
+            // punch the current weight already supports (or nothing → the loop ends with an exit).
+            if (afterStraightBody && cur !in p.needs) continue
+            // (C) no A-B-A oscillation: don't return to the shot from two inside-punches ago.
+            if (inHist.size >= 2) {
+                val twoBack = inHist[inHist.size - 2]; val oneBack = inHist[inHist.size - 1]
+                if (twoBack.num == p.num && twoBack.level == p.level &&
+                    !(oneBack.num == p.num && oneBack.level == p.level)) continue
+            }
             var w = 1.0
             if (prev == null) {
                 w = if (p.shape == PShape.STR) (if (p.num == 1) 6.0 else 2.5) else 0.15
@@ -266,7 +279,8 @@ object ComboAssembler {
             out.add(p to w)
         }
         if (out.isEmpty()) {
-            for (p in pool) if (!(p.isJab() && jabRun >= jabCap)) out.add(p to 1.0)
+            // relaxed fallback keeps the hard weight/straight-body rule (B) but drops the soft guards
+            for (p in pool) if (!(p.isJab() && jabRun >= jabCap) && !(afterStraightBody && cur !in p.needs)) out.add(p to 1.0)
             if (out.isEmpty()) pool.forEach { out.add(it to 1.0) }
         }
         val tot = out.sumOf { it.second }
@@ -315,21 +329,40 @@ object ComboAssembler {
         }
         fun addMove(say: String, leaves: Bal) { acts.add(SA(say, false, false)); cur = leaves; jabRun = 0 }
         fun addCompound(c: Triple<String, Set<Bal>, Bal>) {
+            val pk = compoundPunch(c.first)
             acts.add(SA(c.first, isThrow = true, isCompound = true))
-            cur = c.third; prev = null; jabRun = 0; compoundCount++; seqNums.add(0)
+            cur = c.third; prev = pk; jabRun = 0; compoundCount++
+            punchSeq.add(pk); seqNums.add(pk.num)   // (E) the uppercut is now visible to repeat/oscillation/balance
         }
 
-        // ---- entry ----
+        // ---- entry / openers ----
         if (opts.startDefensive) {
             val opener = listOf(TRANS[1], TRANS[3], TRANS[0]); val o = opener.random(rng); addMove(o.say, o.leaves)
         } else if (opts.insideEntry) {
-            when (listOf("jab", "jab_hook", "feint", "feint_hook", "cross_body").random(rng)) {
-                "jab" -> addPunch(punch("jab"))
-                "cross_body" -> addPunch(punch("cross to the body"))
-                "feint" -> addMove("feint", Bal.N)
-                "jab_hook" -> { addPunch(punch("jab")); addPunch(if (rng.nextBoolean()) punch("{L} hook") else punch("{R} hook")) }
-                "feint_hook" -> { addMove("feint", Bal.N); addPunch(if (rng.nextBoolean()) punch("{L} hook") else punch("{R} hook")) }
-            }
+            // (A) A weighted opener set that seeds the common real openers (1-2, double jab,
+            // double-jab-cross) and defensive/movement openers, then hands to the inside work.
+            val hook = if (rng.nextBoolean()) "{L} hook" else "{R} hook"
+            val slip = if (rng.nextBoolean()) "{L}" else "{R}"
+            val slipLeaves = if (slip == "{L}") Bal.L else Bal.R
+            val ops = listOf<Pair<Double, () -> Unit>>(
+                2.5 to { addPunch(punch("jab")) },
+                4.0 to { addPunch(punch("jab")); addPunch(punch("cross")) },                                  // 1-2
+                3.0 to { addPunch(punch("jab")); addPunch(punch("jab")) },                                     // double jab
+                2.5 to { addPunch(punch("jab")); addPunch(punch("jab")); addPunch(punch("cross")) },           // double-jab-cross
+                1.5 to { addPunch(punch("jab")); addPunch(punch(hook)) },                                      // jab + hook
+                2.0 to { addPunch(punch("jab")); addMove("slip $slip", slipLeaves) },                          // jab-slip
+                1.5 to { addPunch(punch("jab")); addPunch(punch("jab")); addMove("slip $slip", slipLeaves) },  // jab-jab-slip
+                1.5 to { addPunch(punch("jab")); addPunch(punch("cross")); addMove("slip {R}", Bal.R) },       // jab-cross-slip-right
+                1.2 to { addPunch(punch("jab")); addMove("roll {L}", Bal.L) },                                 // jab-roll-left
+                1.2 to { addPunch(punch("jab")); addMove("step {R}", Bal.N) },                                 // jab-step-right
+                0.8 to { addMove("feint", Bal.N) },
+                0.8 to { addMove("feint", Bal.N); addPunch(punch(hook)) },
+                0.8 to { addPunch(punch("cross to the body")) },
+            )
+            val tot = ops.sumOf { it.first }
+            var r = rng.nextDouble(tot); var chosen = ops[0].second
+            for ((w, lay) in ops) { if (r < w) { chosen = lay; break }; r -= w }
+            chosen()
         }
 
         val pool = poolFor(opts)
@@ -340,22 +373,35 @@ object ComboAssembler {
         var guard = 0
         while (guard < 40) {
             guard++
-            val effLen = punchSeq.size + compoundCount
+            val effLen = punchSeq.size                        // compounds now live in punchSeq
             if (opts.exactPunches != null && effLen >= opts.exactPunches) break
             if (opts.maxPunches != null && effLen >= opts.maxPunches) break   // #1 fragment length cap
             if (opts.exactPunches == null && effLen >= 2 &&
                 scoreOf(punchSeq, acts.count { !it.isThrow }, compoundCount) >= opts.target) break
 
-            // #3 occasionally throw a compound (advanced; inside/free only; never two in a row)
+            val afterStraightBody = prev?.isStraightBody() == true
+
+            // (D) compound only when the roll does real work (resets from the wrong foot) — never
+            // when the weight is already right, never after a straight body (B), never two in a row.
             if (opts.compounds && insideish && effLen >= 1 && acts.lastOrNull()?.isCompound != true &&
-                rng.nextDouble() < 0.18) {
-                addCompound(COMPOUNDS.random(rng)); continue
+                !afterStraightBody && rng.nextDouble() < 0.18) {
+                val c = when (cur) { Bal.R -> COMPOUND_L; Bal.L -> COMPOUND_R; else -> null }
+                if (c != null) {
+                    val pk = compoundPunch(c.first)
+                    val identical = prev != null && pk.num == prev!!.num && pk.level == prev!!.level
+                    val inH = punchSeq.filter { it.range == PRange.INSIDE }
+                    val osc = inH.size >= 2 && inH[inH.size - 2].num == pk.num && inH[inH.size - 2].level == pk.level &&
+                        !(inH.last().num == pk.num && inH.last().level == pk.level)
+                    if (!identical && !osc) { addCompound(c); continue }
+                }
             }
 
-            var p = pickPunch(pool, prev, levelFree, jabRun, opts.jabCap, seqNums, opts.attract, punchSeq, rng)
+            var p = pickPunch(pool, prev, levelFree, jabRun, opts.jabCap, seqNums, opts.attract, punchSeq, cur, afterStraightBody, rng)
             if (cur !in p.needs) {
                 if (sameHandVaried(prev, p)) {
                     // #2 sanctioned same-hand varied double — re-loads within the pair, no bridge
+                } else if (afterStraightBody) {
+                    break                                     // (B) can't bridge after a straight body — end (exit added below)
                 } else if (opts.allowLinks) {
                     val (bsay, bl) = bridge(cur, p.needs, prev?.shape, rng); addMove(bsay, bl)
                 } else {
